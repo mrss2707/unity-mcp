@@ -13,14 +13,14 @@ import pytest
 # locate server src dynamically to avoid hardcoded layout assumptions
 ROOT = Path(__file__).resolve().parents[1]
 candidates = [
-    ROOT / "UnityMcpBridge" / "UnityMcpServer~" / "src",
+    ROOT / "MCPForUnity" / "UnityMcpServer~" / "src",
     ROOT / "UnityMcpServer~" / "src",
 ]
 SRC = next((p for p in candidates if p.exists()), None)
 if SRC is None:
     searched = "\n".join(str(p) for p in candidates)
     pytest.skip(
-        "Unity MCP server source not found. Tried:\n" + searched,
+        "MCP for Unity server source not found. Tried:\n" + searched,
         allow_module_level=True,
     )
 sys.path.insert(0, str(SRC))

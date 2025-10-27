@@ -626,7 +626,15 @@ namespace MCPForUnity.Editor.Setup
             }
 
             McpConfigurationHelper.EnsureConfigDirectoryExists(configPath);
-            return McpConfigurationHelper.WriteMcpConfiguration(pythonDir, configPath, client);
+            // Use TOML writer for Codex; JSON writer for others
+            if (client != null && client.mcpType == McpTypes.Codex)
+            {
+                return McpConfigurationHelper.ConfigureCodexClient(pythonDir, configPath, client);
+            }
+            else
+            {
+                return McpConfigurationHelper.WriteMcpConfiguration(pythonDir, configPath, client);
+            }
         }
 
         private void ShowManualSetupInWizard(McpClient client)
@@ -642,7 +650,9 @@ namespace MCPForUnity.Editor.Setup
             }
 
             // Build manual configuration using the sophisticated helper logic
-            string result = McpConfigurationHelper.WriteMcpConfiguration(pythonDir, configPath, client);
+            string result = (client != null && client.mcpType == McpTypes.Codex)
+                ? McpConfigurationHelper.ConfigureCodexClient(pythonDir, configPath, client)
+                : McpConfigurationHelper.WriteMcpConfiguration(pythonDir, configPath, client);
             string manualConfig;
 
             if (result == "Configured successfully")

@@ -3,30 +3,30 @@
 You are running inside CI for the `unity-mcp` repo. Use only the tools allowed by the workflow. Work autonomously; do not prompt the user. Do NOT spawn subagents.
 
 **Print this once, verbatim, early in the run:**
-AllowedTools: Write,mcp__unity__manage_editor,mcp__unity__list_resources,mcp__unity__read_resource,mcp__unity__apply_text_edits,mcp__unity__script_apply_edits,mcp__unity__validate_script,mcp__unity__find_in_file,mcp__unity__read_console,mcp__unity__get_sha
+AllowedTools: Write,mcp__UnityMCP__apply_text_edits,mcp__UnityMCP__script_apply_edits,mcp__UnityMCP__validate_script,mcp__UnityMCP__find_in_file,mcp__UnityMCP__read_console,mcp__UnityMCP__get_sha
 
 ---
 
 ## Mission
 1) Pick target file (prefer):
-   - `unity://path/Assets/Scripts/LongUnityScriptClaudeTest.cs`
+   - `mcpforunity://path/Assets/Scripts/LongUnityScriptClaudeTest.cs`
 2) Execute NL tests NL-0..NL-4 in order using minimal, precise edits that build on each other.
-3) Validate each edit with `mcp__unity__validate_script(level:"standard")`.
+3) Validate each edit with `mcp__UnityMCP__validate_script(level:"standard")`.
 4) **Report**: write one `<testcase>` XML fragment per test to `reports/<TESTID>_results.xml`. Do **not** read or edit `$JUNIT_OUT`.
 
 **CRITICAL XML FORMAT REQUIREMENTS:**
 - Each file must contain EXACTLY one `<testcase>` root element
 - NO prologue, epilogue, code fences, or extra characters
 - NO markdown formatting or explanations outside the XML
-- Use this exact format:
+- Use this exact shape (write the XML directly into the file; do not wrap it in ``` fences):
 
-```xml
 <testcase name="NL-0 — Baseline State Capture" classname="UnityMCP.NL-T">
   <system-out><![CDATA[
 (evidence of what was accomplished)
   ]]></system-out>
 </testcase>
-```
+
+- Must end with the closing tag `</testcase>` (well‑formed XML only).
 
 - If test fails, include: `<failure message="reason"/>`
 - TESTID must be one of: NL-0, NL-1, NL-2, NL-3, NL-4
@@ -38,7 +38,7 @@ AllowedTools: Write,mcp__unity__manage_editor,mcp__unity__list_resources,mcp__un
 ## Environment & Paths (CI)
 - Always pass: `project_root: "TestProjects/UnityMCPTests"` and `ctx: {}` on list/read/edit/validate.
 - **Canonical URIs only**:
-  - Primary: `unity://path/Assets/...` (never embed `project_root` in the URI)
+  - Primary: `mcpforunity://path/Assets/...` (never embed `project_root` in the URI)
   - Relative (when supported): `Assets/...`
 
 CI provides:
@@ -50,7 +50,7 @@ CI provides:
 ## Transcript Minimization Rules
 - Do not restate tool JSON; summarize in ≤ 2 short lines.
 - Never paste full file contents. For matches, include only the matched line and ±1 line.
-- Prefer `mcp__unity__find_in_file` for targeting; avoid `mcp__unity__read_resource` unless strictly necessary. If needed, limit to `head_bytes ≤ 256` or `tail_lines ≤ 10`.
+- Prefer `mcp__UnityMCP__find_in_file` for targeting to minimize transcript size.
 - Per‑test `system-out` ≤ 400 chars: brief status only (no SHA).
 - Console evidence: fetch the last 10 lines with `include_stacktrace:false` and include ≤ 3 lines in the fragment.
 - Avoid quoting multi‑line diffs; reference markers instead.
@@ -59,17 +59,17 @@ CI provides:
 ---
 
 ## Tool Mapping
-- **Anchors/regex/structured**: `mcp__unity__script_apply_edits`
+- **Anchors/regex/structured**: `mcp__UnityMCP__script_apply_edits`
   - Allowed ops: `anchor_insert`, `replace_method`, `insert_method`, `delete_method`, `regex_replace`
   - For `anchor_insert`, always set `"position": "before"` or `"after"`.
-- **Precise ranges / atomic batch**: `mcp__unity__apply_text_edits` (non‑overlapping ranges)
+- **Precise ranges / atomic batch**: `mcp__UnityMCP__apply_text_edits` (non‑overlapping ranges)
 STRICT OP GUARDRAILS
 - Do not use `anchor_replace`. Structured edits must be one of: `anchor_insert`, `replace_method`, `insert_method`, `delete_method`, `regex_replace`.
-- For multi‑spot textual tweaks in one operation, compute non‑overlapping ranges with `mcp__unity__find_in_file` and use `mcp__unity__apply_text_edits`.
+- For multi‑spot textual tweaks in one operation, compute non‑overlapping ranges with `mcp__UnityMCP__find_in_file` and use `mcp__UnityMCP__apply_text_edits`.
 
-- **Hash-only**: `mcp__unity__get_sha` — returns `{sha256,lengthBytes,lastModifiedUtc}` without file body
-- **Validation**: `mcp__unity__validate_script(level:"standard")`
-- **Dynamic targeting**: Use `mcp__unity__find_in_file` to locate current positions of methods/markers
+- **Hash-only**: `mcp__UnityMCP__get_sha` — returns `{sha256,lengthBytes,lastModifiedUtc}` without file body
+- **Validation**: `mcp__UnityMCP__validate_script(level:"standard")`
+- **Dynamic targeting**: Use `mcp__UnityMCP__find_in_file` to locate current positions of methods/markers
 
 ---
 
@@ -83,7 +83,7 @@ STRICT OP GUARDRAILS
 5. **Composability**: Tests demonstrate how operations work together in real workflows
 
 **State Tracking:**
-- Track file SHA after each test (`mcp__unity__get_sha`) for potential preconditions in later passes. Do not include SHA values in report fragments.
+- Track file SHA after each test (`mcp__UnityMCP__get_sha`) for potential preconditions in later passes. Do not include SHA values in report fragments.
 - Use content signatures (method names, comment markers) to verify expected state
 - Validate structural integrity after each major change
 
@@ -103,25 +103,27 @@ STRICT OP GUARDRAILS
 **Goal**: Demonstrate method replacement operations
 **Actions**: 
 - Replace `HasTarget()` method body: `public bool HasTarget() { return currentTarget != null; }`
-- Insert `PrintSeries()` method after `GetCurrentTarget()`: `public void PrintSeries() { Debug.Log("1,2,3"); }`
-- Verify both methods exist and are properly formatted
+- Validate.
+- Insert `PrintSeries()` method after a unique anchor method. Prefer `GetCurrentTarget()` if unique; otherwise use another unique method such as `ApplyBlend`. Insert: `public void PrintSeries() { Debug.Log("1,2,3"); }`
+- Validate that both methods exist and are properly formatted.
 - Delete `PrintSeries()` method (cleanup for next test)
 - **Expected final state**: `HasTarget()` modified, file structure intact, no temporary methods
 
 ### NL-2. Anchor Comment Insertion (Additive State B) 
 **Goal**: Demonstrate anchor-based insertions above methods
 **Actions**:
-- Use `find_in_file` to locate current position of `Update()` method
+- Use `find_in_file` with a tolerant anchor to locate the `Update()` method, e.g. `(?m)^\\s*(?:public|private|protected|internal)?\\s*void\\s+Update\\s*\\(\\s*\\)`
+- Expect exactly one match; if multiple, fail clearly rather than guessing.
 - Insert `// Build marker OK` comment line above `Update()` method
 - Verify comment exists and `Update()` still functions
 - **Expected final state**: State A + build marker comment above `Update()`
 
 ### NL-3. End-of-Class Content (Additive State C)
-**Goal**: Demonstrate end-of-class insertions with smart brace matching
+**Goal**: Demonstrate end-of-class insertions without ambiguous anchors
 **Actions**:
-- Match the final class-closing brace by scanning from EOF (e.g., last `^\s*}\s*$`)
-  or compute via `find_in_file` + ranges; insert immediately before it.
-- Insert three comment lines before final class brace:
+- Use `find_in_file` to locate brace-only lines (e.g., `(?m)^\\s*}\\s*$`). Select the **last** such line (preferably indentation 0 if multiples).
+- Compute an exact insertion point immediately before that last brace using `apply_text_edits` (do not use `anchor_insert` for this step).
+- Insert three comment lines before the final class brace:
   ```
   // Tail test A
   // Tail test B  
@@ -159,7 +161,7 @@ find_in_file(pattern: "public bool HasTarget\\(\\)")
 
 **Anchor-based insertions:**
 ```json  
-{"op": "anchor_insert", "anchor": "private void Update\\(\\)", "position": "before", "text": "// comment"}
+{"op": "anchor_insert", "anchor": "(?m)^\\s*(?:public|private|protected|internal)?\\s*void\\s+Update\\s*\\(\\s*\\)", "position": "before", "text": "// comment"}
 ```
 
 ---

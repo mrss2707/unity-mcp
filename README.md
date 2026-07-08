@@ -1,367 +1,114 @@
-<img width="676" height="380" alt="MCP for Unity" src="docs/images/logo.png" />
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-header-dark.png">
+    <img alt="MCP for Unity" src="docs/images/logo-header-light.png" width="400">
+  </picture>
+</p>
 
-| [English](README.md) | [简体中文](README-zh.md) |
-|----------------------|---------------------------------|
+<div align="center">
 
-#### Proudly sponsored and maintained by [Coplay](https://www.coplay.dev/?ref=unity-mcp) -- the best AI assistant for Unity.
+[English](README.md) <img src="docs/images/connector.svg" alt="↔" height="14"> [简体中文](docs/i18n/README-zh.md) &nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp; [Discord](https://discord.gg/y4p8KfzrN4) <img src="docs/images/connector.svg" alt="↔" height="14"> [Wiki](https://coplaydev.github.io/unity-mcp/)
 
-[![Discord](https://img.shields.io/badge/discord-join-red.svg?logo=discord&logoColor=white)](https://discord.gg/y4p8KfzrN4)
-[![](https://img.shields.io/badge/Website-Visit-purple)](https://www.coplay.dev/?ref=unity-mcp)
-[![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
-[![python](https://img.shields.io/badge/Python-3.12-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org)
-[![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/w/CoplayDev/unity-mcp)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/CoplayDev/unity-mcp)
-[![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
+#### Proudly sponsored and maintained by [Aura](https://www.tryaura.dev/) — the AI assistant for Unreal & Unity.
+##### And don't miss [Godot AI](https://github.com/hi-godot/godot-ai), the new open source project from the makers of MCP for Unity.
 
-**Create your Unity apps with LLMs!**
+</div>
 
-MCP for Unity acts as a bridge, allowing AI assistants (like Claude, Cursor) to interact directly with your Unity Editor via a local **MCP (Model Context Protocol) Client**. Give your LLM tools to manage assets, control scenes, edit scripts, and automate tasks within Unity.
+<p align="center"><b>Create your Unity apps with LLMs.</b> MCP for Unity bridges AI assistants — Claude, Codex, VS Code, local LLMs, and more — with your Unity Editor via <a href="https://modelcontextprotocol.io/introduction">Model Context Protocol</a>. Give your LLM the tools to manage assets, control scenes, edit scripts, run tests, and automate your game dev workflows.</p>
 
-![MCP for Unity](docs/images/readme_ui.png)
-
----
-
-### 💬 Join Our [Discord](https://discord.gg/y4p8KfzrN4)
-
-**Get help, share ideas, and collaborate with other MCP for Unity developers!**  
+<p align="center">
+  <img alt="MCP for Unity building a scene" src="docs/images/building_scene.gif">
+</p>
 
 ---
 
-## Key Features 🚀
-
-* **🗣️ Natural Language Control:** Instruct your LLM to perform Unity tasks.
-* **🛠️ Powerful Tools:** Manage assets, scenes, materials, scripts, and editor functions.
-* **🤖 Automation:** Automate repetitive Unity workflows.
-* **🧩 Extensible:** Designed to work with various MCP Clients.
-
-<details open>
-  <summary><strong>Tools</strong></summary>
-
-  Your LLM can use functions like:
-
-  * `read_console`: Gets messages from or clears the console.
-  * `manage_script`: Manages C# scripts (create, read, update, delete).
-  * `manage_editor`: Controls and queries the editor's state and settings.
-  * `manage_scene`: Manages scenes (load, save, create, get hierarchy, etc.).
-  * `manage_asset`: Performs asset operations (import, create, modify, delete, etc.).
-  * `manage_shader`: Performs shader CRUD operations (create, read, modify, delete).
-  * `manage_gameobject`: Manages GameObjects: create, modify, delete, find, and component operations.
-  * `execute_menu_item`: Executes Unity Editor menu items (e.g., "File/Save Project").
-  * `apply_text_edits`: Precise text edits with precondition hashes and atomic multi-edit batches.
-  * `script_apply_edits`: Structured C# method/class edits (insert/replace/delete) with safer boundaries.
-  * `validate_script`: Fast validation (basic/standard) to catch syntax/structure issues before/after writes.
-  * `run_test`: Runs a tests in the Unity Editor.
-</details>
-
-
-<details open>
-  <summary><strong>Resources</strong></summary>
-
-  Your LLM can retrieve the following resources:
-
-  * `menu_items`: Retrieves all available menu items in the Unity Editor.
-  * `tests`: Retrieves all available tests in the Unity Editor. Can select tests of a specific type (e.g., "EditMode", "PlayMode").
-</details>
----
-
-## How It Works 
-
-MCP for Unity connects your tools using two components:
-
-1. **MCP for Unity Bridge:** A Unity package running inside the Editor. (Installed via Package Manager).
-2. **MCP for Unity Server:** A Python server that runs locally, communicating between the Unity Bridge and your MCP Client. (Installed automatically by the package on first run or via Auto-Setup; manual setup is available as a fallback).
-
-<img width="562" height="121" alt="image" src="https://github.com/user-attachments/assets/9abf9c66-70d1-4b82-9587-658e0d45dc3e" />
-
----
-
-## Installation ⚙️
-
-### Prerequisites
-
-  * **Python:** Version 3.11 or newer. [Download Python](https://www.python.org/downloads/)
-  * **Unity Hub & Editor:** Version 2021.3 LTS or newer. [Download Unity](https://unity.com/download)
-  * **uv (Python toolchain manager):**
-      ```bash
-      # macOS / Linux
-      curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      # Windows (PowerShell)
-      winget install --id=astral-sh.uv  -e
-
-      # Docs: https://docs.astral.sh/uv/getting-started/installation/
-      ```
-      
-  * **An MCP Client:** : [Claude Desktop](https://claude.ai/download) | [Claude Code](https://github.com/anthropics/claude-code) | [Cursor](https://www.cursor.com/en/downloads) | [Visual Studio Code Copilot](https://code.visualstudio.com/docs/copilot/overview) | [Windsurf](https://windsurf.com) | Others work with manual config
-
- *  <details> <summary><strong>[Optional] Roslyn for Advanced Script Validation</strong></summary>
-
-        For **Strict** validation level that catches undefined namespaces, types, and methods: 
-
-        **Method 1: NuGet for Unity (Recommended)**
-        1. Install [NuGetForUnity](https://github.com/GlitchEnzo/NuGetForUnity)
-        2. Go to `Window > NuGet Package Manager`
-        3. Search for `Microsoft.CodeAnalysis`, select version 4.14.0, and install the package
-        4. Also install package `SQLitePCLRaw.core` and `SQLitePCLRaw.bundle_e_sqlite3`.
-        5. Go to `Player Settings > Scripting Define Symbols`
-        6. Add `USE_ROSLYN`
-        7. Restart Unity
-
-        **Method 2: Manual DLL Installation**
-        1. Download Microsoft.CodeAnalysis.CSharp.dll and dependencies from [NuGet](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp/)
-        2. Place DLLs in `Assets/Plugins/` folder
-        3. Ensure .NET compatibility settings are correct
-        4. Add `USE_ROSLYN` to Scripting Define Symbols
-        5. Restart Unity
-
-        **Note:** Without Roslyn, script validation falls back to basic structural checks. Roslyn enables full C# compiler diagnostics with precise error reporting.</details>
-
----
-### 🌟 Step 1: Install the Unity Package
-
-#### To install via Git URL
-
-1. Open your Unity project.
-2. Go to `Window > Package Manager`.
-3. Click `+` -> `Add package from git URL...`.
-4. Enter:
-    ```
-    https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity
-    ```
-5. Click `Add`.
-
-#### To install via OpenUPM
-
-1. Install the [OpenUPM CLI](https://openupm.com/docs/getting-started-cli.html)
-2. Open a terminal (PowerShell, Terminal, etc.) and navigate to your Unity project directory
-3. Run `openupm add com.coplaydev.unity-mcp`
-
-**Note:** If you installed the MCP Server before Coplay's maintenance, you will need to uninstall the old package before re-installing the new one.
-
-### 🛠️ Step 2: Configure Your MCP Client
-Connect your MCP Client (Claude, Cursor, etc.) to the Python server set up in Step 1 (auto) or via Manual Configuration (below).
-
-**Option A: Auto-Setup (Recommended for Claude/Cursor/VSC Copilot)**
-
-1. In Unity, go to `Window > MCP for Unity`.
-2. Click `Auto-Setup`.
-3. Look for a green status indicator 🟢 and "Connected ✓". *(This attempts to modify the MCP Client's config file automatically).* 
-
-<details><summary><strong>Client-specific troubleshooting</strong></summary>
-
-  - **VSCode**: uses `Code/User/mcp.json` with top-level `servers.unityMCP` and `"type": "stdio"`. On Windows, MCP for Unity writes an absolute `uv.exe` (prefers WinGet Links shim) to avoid PATH issues.
-  - **Cursor / Windsurf** [(**help link**)](https://github.com/CoplayDev/unity-mcp/wiki/1.-Fix-Unity-MCP-and-Cursor,-VSCode-&-Windsurf): if `uv` is missing, the MCP for Unity window shows "uv Not Found" with a quick [HELP] link and a "Choose `uv` Install Location" button.
-  - **Claude Code** [(**help link**)](https://github.com/CoplayDev/unity-mcp/wiki/2.-Fix-Unity-MCP-and-Claude-Code): if `claude` isn't found, the window shows "Claude Not Found" with [HELP] and a "Choose Claude Location" button. Unregister now updates the UI immediately.</details>
-
-
-**Option B: Manual Configuration**
-
-If Auto-Setup fails or you use a different client:
-
-1. **Find your MCP Client's configuration file.** (Check client documentation).
-    * *Claude Example (macOS):* `~/Library/Application Support/Claude/claude_desktop_config.json`
-    * *Claude Example (Windows):* `%APPDATA%\Claude\claude_desktop_config.json`
-2. **Edit the file** to add/update the `mcpServers` section, using the *exact* paths from Step 1.
-
+<!-- recent-updates:start -->
 <details>
-<summary><strong>Click for Client-Specific JSON Configuration Snippets...</strong></summary>
+<summary><strong>Recent Updates</strong></summary>
 
-  ---
-**Claude Code**
+* **[v10.0.0](https://github.com/CoplayDev/unity-mcp/releases/tag/v10.0.0)** (2026-06-30)
+* **[v9.7.3](https://github.com/CoplayDev/unity-mcp/releases/tag/v9.7.3)** (2026-06-15)
+* **[v9.7.1](https://github.com/CoplayDev/unity-mcp/releases/tag/v9.7.1)** (2026-05-24)
+* **[v9.7.0](https://github.com/CoplayDev/unity-mcp/releases/tag/v9.7.0)** (2026-05-22)
+* **[v9.6.8](https://github.com/CoplayDev/unity-mcp/releases/tag/v9.6.8)** (2026-04-27)
 
-If you're using Claude Code, you can register the MCP server using the below commands:
-
-**macOS:**
-
-```bash
-claude mcp add --scope user UnityMCP -- uv --directory /Users/USERNAME/Library/AppSupport/UnityMCP/UnityMcpServer/src run server.py
-```
-
-**Windows:**
-
-```bash
-claude mcp add --scope user UnityMCP -- "C:/Users/USERNAME/AppData/Local/Microsoft/WinGet/Links/uv.exe" --directory "C:/Users/USERNAME/AppData/Local/UnityMCP/UnityMcpServer/src" run server.py
-```
-**VSCode (all OS)**
-
-```json
-{
-  "servers": {
-    "unityMCP": {
-      "command": "uv",
-      "args": ["--directory","<ABSOLUTE_PATH_TO>/UnityMcpServer/src","run","server.py"],
-      "type": "stdio"
-    }
-  }
-}
-```
-
-On Windows, set `command` to the absolute shim, e.g. `C:\\Users\\YOU\\AppData\\Local\\Microsoft\\WinGet\\Links\\uv.exe`.
-
-**Windows:**
-
-  ```json
-  {
-    "mcpServers": {
-      "UnityMCP": {
-        "command": "uv",
-        "args": [
-          "run",
-          "--directory",
-          "C:\\Users\\YOUR_USERNAME\\AppData\\Local\\UnityMCP\\UnityMcpServer\\src",
-          "server.py"
-        ]
-      }
-      // ... other servers might be here ...
-    }
-  }
-``` 
-
-(Remember to replace YOUR_USERNAME and use double backslashes \\)
-
-**macOS:**
-
-```json
-{
-  "mcpServers": {
-    "UnityMCP": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/Users/YOUR_USERNAME/Library/AppSupport/UnityMCP/UnityMcpServer/src",
-        "server.py"
-      ]
-    }
-    // ... other servers might be here ...
-  }
-}
-```
-
-(Replace YOUR_USERNAME. Note: AppSupport is a symlink to "Application Support" to avoid quoting issues)
-
-**Linux:**
-
-```json
-{
-  "mcpServers": {
-    "UnityMCP": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/home/YOUR_USERNAME/.local/share/UnityMCP/UnityMcpServer/src",
-        "server.py"
-      ]
-    }
-    // ... other servers might be here ...
-  }
-}
-```
-
-(Replace YOUR_USERNAME)
-
+Full history: [Release Notes](https://coplaydev.github.io/unity-mcp/releases).
 
 </details>
+<!-- recent-updates:end -->
 
 ---
 
-## Usage ▶️
+## What it does
 
-1. **Open your Unity Project.** The MCP for Unity package should connect automatically. Check status via Window > MCP for Unity.
-    
-2. **Start your MCP Client** (Claude, Cursor, etc.). It should automatically launch the MCP for Unity Server (Python) using the configuration from Installation Step 2.
-    
-3. **Interact!** Unity tools should now be available in your MCP Client.
-    
-    Example Prompt: `Create a 3D player controller`, `Create a tic-tac-toe game in 3D`, `Create a cool shader and apply to a cube`.
+Control the Unity Editor in natural language from any MCP client — create scenes & GameObjects, edit C# scripts, manage assets, run tests, profile, and build. 47 focused MCP tool entrypoints, any client, free & MIT.
+
+**[Browse the full tool catalog →](https://coplaydev.github.io/unity-mcp/reference/tools/)**
 
 ---
 
-## Development & Contributing 🛠️
+## Quickstart
 
-### Development Setup and Guidelines
+**Requirements:** Unity **2021.3 LTS → 6.x** · Python **3.10+** (via [`uv`](https://docs.astral.sh/uv/)). Works with **any MCP client** — Claude Desktop & Code, Cursor, VS Code, Windsurf, Cline, Gemini CLI, and more.
 
-See [README-DEV.md](docs/README-DEV.md) for complete development setup and workflow documentation.
-
-### Adding Custom Tools
-
-MCP for Unity uses a Python MCP Server tied with Unity's C# scripts for tools. If you'd like to extend the functionality with your own tools, learn how to do so in **[CUSTOM_TOOLS.md](docs/CUSTOM_TOOLS.md)**.
-
-### How to Contribute
-
-1. **Fork** the main repository.
-2. **Create an issue** to discuss your idea or bug.
-3. **Create a branch** (`feature/your-idea` or `bugfix/your-fix`).
-4. **Make changes.**
-5. **Commit** (feat: Add cool new feature).
-6. **Push** your branch.
-7. **Open a Pull Request** against the main branch, referencing the issue you created earlier.
+1. **Install** — Unity → Package Manager → Add from git URL:
+   `https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#main` &nbsp;_(pin `#v10.0.0` for this release, or `openupm add com.coplaydev.unity-mcp`)_
+2. **Configure** — `Window → MCP for Unity → Configure All Detected Clients`.
+3. **Prompt** — *"Create a cube at the origin and add a Rigidbody."* The cube appears in seconds.
 
 ---
 
-## 📊 Telemetry & Privacy
+## Community
 
-MCP for Unity includes **privacy-focused, anonymous telemetry** to help us improve the product. We collect usage analytics and performance data, but **never** your code, project names, or personal information.
+- [Discord](https://discord.gg/y4p8KfzrN4) — chat with maintainers and other contributors
+- [Issues](https://github.com/CoplayDev/unity-mcp/issues) — bugs and feature requests
+- [Discussions](https://github.com/CoplayDev/unity-mcp/discussions) — design ideas and broader questions
+- Security: see [SECURITY.md](SECURITY.md) for private reporting
 
-- **🔒 Anonymous**: Random UUIDs only, no personal data
-- **🚫 Easy opt-out**: Set `DISABLE_TELEMETRY=true` environment variable
-- **📖 Transparent**: See [TELEMETRY.md](docs/TELEMETRY.md) for full details
+## Contributing
 
-Your privacy matters to us. All telemetry is optional and designed to respect your workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Branch off `beta`, not `main`. The full dev setup, testing, and release process live in the [Contributing](https://coplaydev.github.io/unity-mcp/contributing/dev-setup) docs.
 
----
+## Advanced
 
-## Troubleshooting ❓
-
-<details>  
-<summary><strong>Click to view common issues and fixes...</strong></summary>  
-
-- **Unity Bridge Not Running/Connecting:**
-    - Ensure Unity Editor is open.
-    - Check the status window: Window > MCP for Unity.
-    - Restart Unity.
-- **MCP Client Not Connecting / Server Not Starting:**
-    - **Verify Server Path:** Double-check the --directory path in your MCP Client's JSON config. It must exactly match the installation location:
-      - **Windows:** `%USERPROFILE%\AppData\Local\UnityMCP\UnityMcpServer\src`
-      - **macOS:** `~/Library/AppSupport/UnityMCP/UnityMcpServer\src` 
-      - **Linux:** `~/.local/share/UnityMCP/UnityMcpServer\src`
-    - **Verify uv:** Make sure `uv` is installed and working (`uv --version`).
-    - **Run Manually:** Try running the server directly from the terminal to see errors: 
-      ```bash
-      cd /path/to/your/UnityMCP/UnityMcpServer/src
-      uv run server.py
-      ```
-- **Configuration Failed:**
-    - Use the Manual Configuration steps. The plugin may lack permissions to write to the MCP client's config file.
-
-</details>  
-
-Still stuck? [Open an Issue](https://github.com/CoplayDev/unity-mcp/issues) or [Join the Discord](https://discord.gg/y4p8KfzrN4)!
-
----
-
-## License 📜
-
-MIT License. See [LICENSE](LICENSE) file.
-
----
+- **Multiple Unity instances** — [Multi-Instance Routing](https://coplaydev.github.io/unity-mcp/guides/multi-instance)
+- **Tool groups (vfx / animation / ui / testing / etc.)** — [Tool Groups](https://coplaydev.github.io/unity-mcp/guides/tool-groups)
+- **v10 asset generation and upgrade notes** — [v10 Migration](https://coplaydev.github.io/unity-mcp/migrations/v10)
+- **Roslyn script validation** — [Roslyn Validation](https://coplaydev.github.io/unity-mcp/guides/roslyn)
+- **Remote-hosted server with auth** — [Remote Server Auth](https://coplaydev.github.io/unity-mcp/guides/remote-server-auth)
 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=CoplayDev/unity-mcp&type=Date)](https://www.star-history.com/#CoplayDev/unity-mcp&Date)
 
-## Unity AI Tools by Coplay
+## Citation
 
-Coplay offers 2 AI tools for Unity
+If MCP for Unity helped your research, please cite it.
+
+```bibtex
+@inproceedings{wu2025mcpunity,
+  author    = {Wu, Shutong and Barnett, Justin P.},
+  title     = {{MCP-Unity}: {Protocol-Driven} Framework for Interactive {3D} Authoring},
+  year      = {2025},
+  isbn      = {9798400721366},
+  publisher = {Association for Computing Machinery},
+  address   = {New York, NY, USA},
+  url       = {https://doi.org/10.1145/3757376.3771417},
+  doi       = {10.1145/3757376.3771417},
+  series    = {SA Technical Communications '25}
+}
+```
+
+## Unity AI Tools by Aura
+
+Aura offers 2 AI tools for Unity:
 - **MCP for Unity** is available freely under the MIT license.
-- **Coplay** is a premium Unity AI assistant that sits within Unity and is more than the MCP for Unity.
-
-(These tools have different tech stacks. See this blog post [comparing Coplay to MCP for Unity](https://www.coplay.dev/blog/comparing-coplay-and-unity-mcp).)
-
-<img alt="Coplay" src="docs/images/coplay-logo.png" />
+- **Aura for Unity** is a premium Unity/Unreal AI assistant built for game devs.
 
 ## Disclaimer
 
 This project is a free and open-source tool for the Unity Editor, and is not affiliated with Unity Technologies.
+
+---
+
+**License:** MIT — see [LICENSE](LICENSE).

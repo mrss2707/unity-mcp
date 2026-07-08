@@ -2,17 +2,17 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
-using MCPForUnity.Editor.Helpers;
 
 namespace MCPForUnity.Editor.Tools
 {
     /// <summary>
     /// Handles CRUD operations for shader files within the Unity project.
     /// </summary>
-    [McpForUnityTool("manage_shader")]
+    [McpForUnityTool("manage_shader", AutoRegister = false, Group = "vfx")]
     public static class ManageShader
     {
         /// <summary>
@@ -21,7 +21,7 @@ namespace MCPForUnity.Editor.Tools
         public static object HandleCommand(JObject @params)
         {
             // Extract parameters
-            string action = @params["action"]?.ToString().ToLower();
+            string action = @params["action"]?.ToString()?.ToLowerInvariant();
             string name = @params["name"]?.ToString();
             string path = @params["path"]?.ToString(); // Relative to Assets/
             string contents = null;
@@ -36,7 +36,7 @@ namespace MCPForUnity.Editor.Tools
                 }
                 catch (Exception e)
                 {
-                    return Response.Error($"Failed to decode shader contents: {e.Message}");
+                    return new ErrorResponse($"Failed to decode shader contents: {e.Message}");
                 }
             }
             else
@@ -47,16 +47,16 @@ namespace MCPForUnity.Editor.Tools
             // Validate required parameters
             if (string.IsNullOrEmpty(action))
             {
-                return Response.Error("Action parameter is required.");
+                return new ErrorResponse("Action parameter is required.");
             }
             if (string.IsNullOrEmpty(name))
             {
-                return Response.Error("Name parameter is required.");
+                return new ErrorResponse("Name parameter is required.");
             }
             // Basic name validation (alphanumeric, underscores, cannot start with number)
             if (!Regex.IsMatch(name, @"^[a-zA-Z_][a-zA-Z0-9_]*$"))
             {
-                return Response.Error(
+                return new ErrorResponse(
                     $"Invalid shader name: '{name}'. Use only letters, numbers, underscores, and don't start with a number."
                 );
             }
@@ -66,8 +66,12 @@ namespace MCPForUnity.Editor.Tools
             string relativeDir = path ?? "Shaders"; // Default to "Shaders" if path is null
             if (!string.IsNullOrEmpty(relativeDir))
             {
-                relativeDir = relativeDir.Replace('\\', '/').Trim('/');
-                if (relativeDir.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                relativeDir = AssetPathUtility.NormalizeSeparators(relativeDir).Trim('/');
+                if (string.Equals(relativeDir, "Assets", StringComparison.OrdinalIgnoreCase))
+                {
+                    relativeDir = "";
+                }
+                else if (relativeDir.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
                 {
                     relativeDir = relativeDir.Substring("Assets/".Length).TrimStart('/');
                 }
@@ -82,8 +86,9 @@ namespace MCPForUnity.Editor.Tools
             string shaderFileName = $"{name}.shader";
             string fullPathDir = Path.Combine(Application.dataPath, relativeDir);
             string fullPath = Path.Combine(fullPathDir, shaderFileName);
-            string relativePath = Path.Combine("Assets", relativeDir, shaderFileName)
-                .Replace('\\', '/'); // Ensure "Assets/" prefix and forward slashes
+            string relativePath = AssetPathUtility.NormalizeSeparators(
+                Path.Combine("Assets", relativeDir, shaderFileName)
+            ); // Ensure "Assets/" prefix and forward slashes
 
             // Ensure the target directory exists for create/update
             if (action == "create" || action == "update")
@@ -94,12 +99,12 @@ namespace MCPForUnity.Editor.Tools
                     {
                         Directory.CreateDirectory(fullPathDir);
                         // Refresh AssetDatabase to recognize new folders
-                        AssetDatabase.Refresh();
+                        AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
                     }
                 }
                 catch (Exception e)
                 {
-                    return Response.Error(
+                    return new ErrorResponse(
                         $"Could not create directory '{fullPathDir}': {e.Message}"
                     );
                 }
@@ -117,7 +122,7 @@ namespace MCPForUnity.Editor.Tools
                 case "delete":
                     return DeleteShader(fullPath, relativePath);
                 default:
-                    return Response.Error(
+                    return new ErrorResponse(
                         $"Unknown action: '{action}'. Valid actions are: create, read, update, delete."
                     );
             }
@@ -151,7 +156,7 @@ namespace MCPForUnity.Editor.Tools
             // Check if shader already exists
             if (File.Exists(fullPath))
             {
-                return Response.Error(
+                return new ErrorResponse(
                     $"Shader already exists at '{relativePath}'. Use 'update' action to modify."
                 );
             }
@@ -159,7 +164,7 @@ namespace MCPForUnity.Editor.Tools
             // Add validation for shader name conflicts in Unity
             if (Shader.Find(name) != null)
             {
-                return Response.Error(
+                return new ErrorResponse(
                     $"A shader with name '{name}' already exists in the project. Choose a different name."
                 );
             }
@@ -174,15 +179,15 @@ namespace MCPForUnity.Editor.Tools
             {
                 File.WriteAllText(fullPath, contents, new System.Text.UTF8Encoding(false));
                 AssetDatabase.ImportAsset(relativePath);
-                AssetDatabase.Refresh(); // Ensure Unity recognizes the new shader
-                return Response.Success(
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport); // Ensure Unity recognizes the new shader
+                return new SuccessResponse(
                     $"Shader '{name}.shader' created successfully at '{relativePath}'.",
                     new { path = relativePath }
                 );
             }
             catch (Exception e)
             {
-                return Response.Error($"Failed to create shader '{relativePath}': {e.Message}");
+                return new ErrorResponse($"Failed to create shader '{relativePath}': {e.Message}");
             }
         }
 
@@ -190,7 +195,7 @@ namespace MCPForUnity.Editor.Tools
         {
             if (!File.Exists(fullPath))
             {
-                return Response.Error($"Shader not found at '{relativePath}'.");
+                return new ErrorResponse($"Shader not found at '{relativePath}'.");
             }
 
             try
@@ -209,14 +214,14 @@ namespace MCPForUnity.Editor.Tools
                     contentsEncoded = isLarge,
                 };
 
-                return Response.Success(
+                return new SuccessResponse(
                     $"Shader '{Path.GetFileName(relativePath)}' read successfully.",
                     responseData
                 );
             }
             catch (Exception e)
             {
-                return Response.Error($"Failed to read shader '{relativePath}': {e.Message}");
+                return new ErrorResponse($"Failed to read shader '{relativePath}': {e.Message}");
             }
         }
 
@@ -229,28 +234,28 @@ namespace MCPForUnity.Editor.Tools
         {
             if (!File.Exists(fullPath))
             {
-                return Response.Error(
+                return new ErrorResponse(
                     $"Shader not found at '{relativePath}'. Use 'create' action to add a new shader."
                 );
             }
             if (string.IsNullOrEmpty(contents))
             {
-                return Response.Error("Content is required for the 'update' action.");
+                return new ErrorResponse("Content is required for the 'update' action.");
             }
 
             try
             {
                 File.WriteAllText(fullPath, contents, new System.Text.UTF8Encoding(false));
                 AssetDatabase.ImportAsset(relativePath);
-                AssetDatabase.Refresh();
-                return Response.Success(
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                return new SuccessResponse(
                     $"Shader '{Path.GetFileName(relativePath)}' updated successfully.",
                     new { path = relativePath }
                 );
             }
             catch (Exception e)
             {
-                return Response.Error($"Failed to update shader '{relativePath}': {e.Message}");
+                return new ErrorResponse($"Failed to update shader '{relativePath}': {e.Message}");
             }
         }
 
@@ -258,7 +263,7 @@ namespace MCPForUnity.Editor.Tools
         {
             if (!File.Exists(fullPath))
             {
-                return Response.Error($"Shader not found at '{relativePath}'.");
+                return new ErrorResponse($"Shader not found at '{relativePath}'.");
             }
 
             try
@@ -267,7 +272,7 @@ namespace MCPForUnity.Editor.Tools
                 bool success = AssetDatabase.DeleteAsset(relativePath);
                 if (!success)
                 {
-                    return Response.Error($"Failed to delete shader through Unity's AssetDatabase: '{relativePath}'");
+                    return new ErrorResponse($"Failed to delete shader through Unity's AssetDatabase: '{relativePath}'");
                 }
 
                 // If the file still exists (rare case), try direct deletion
@@ -276,11 +281,11 @@ namespace MCPForUnity.Editor.Tools
                     File.Delete(fullPath);
                 }
 
-                return Response.Success($"Shader '{Path.GetFileName(relativePath)}' deleted successfully.");
+                return new SuccessResponse($"Shader '{Path.GetFileName(relativePath)}' deleted successfully.");
             }
             catch (Exception e)
             {
-                return Response.Error($"Failed to delete shader '{relativePath}': {e.Message}");
+                return new ErrorResponse($"Failed to delete shader '{relativePath}': {e.Message}");
             }
         }
 

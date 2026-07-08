@@ -1,10 +1,12 @@
 using System;
 using System.IO;
+using MCPForUnity.Editor.Tools;
+using MCPForUnity.Editor.Tools.GameObjects;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using MCPForUnity.Editor.Tools;
+using static MCPForUnityTests.Editor.TestUtilities;
 
 namespace MCPForUnityTests.Editor.Tools
 {
@@ -55,12 +57,17 @@ namespace MCPForUnityTests.Editor.Tools
             {
                 AssetDatabase.DeleteAsset(_matPath);
             }
-            AssetDatabase.Refresh();
-        }
 
-        private static JObject ToJObject(object result)
-        {
-            return result as JObject ?? JObject.FromObject(result);
+            // Clean up temp directory after each test
+            if (AssetDatabase.IsValidFolder(TempRoot))
+            {
+                AssetDatabase.DeleteAsset(TempRoot);
+            }
+
+            // Clean up empty parent folders to avoid debris
+            CleanupEmptyParentFolders(TempRoot);
+
+            AssetDatabase.Refresh();
         }
 
         [Test]
@@ -97,7 +104,7 @@ namespace MCPForUnityTests.Editor.Tools
         }
 
         [Test]
-        public void AssignMaterial_ToSphere_UsingComponentPropertiesObject_Succeeds()
+        public void AssignMaterial_ToSphere_UsingManageMaterial_Succeeds()
         {
             // Ensure material exists first
             CreateMaterial_WithObjectProperties_SucceedsAndSetsColor();
@@ -115,23 +122,18 @@ namespace MCPForUnityTests.Editor.Tools
             _sphere = GameObject.Find("ToolTestSphere");
             Assert.IsNotNull(_sphere, "Sphere should be created.");
 
-            // Assign material via object-typed componentProperties
-            var modifyParams = new JObject
+            // Assign material via ManageMaterial tool
+            var assignParams = new JObject
             {
-                ["action"] = "modify",
+                ["action"] = "assign_material_to_renderer",
                 ["target"] = "ToolTestSphere",
                 ["searchMethod"] = "by_name",
-                ["componentProperties"] = new JObject
-                {
-                    ["MeshRenderer"] = new JObject
-                    {
-                        ["sharedMaterial"] = _matPath
-                    }
-                }
+                ["materialPath"] = _matPath,
+                ["slot"] = 0
             };
 
-            var modifyResult = ToJObject(ManageGameObject.HandleCommand(modifyParams));
-            Assert.IsTrue(modifyResult.Value<bool>("success"), modifyResult.Value<string>("error"));
+            var assignResult = ToJObject(ManageMaterial.HandleCommand(assignParams));
+            Assert.IsTrue(assignResult.Value<bool>("success"), assignResult.ToString());
 
             var renderer = _sphere.GetComponent<MeshRenderer>();
             Assert.IsNotNull(renderer, "Sphere should have MeshRenderer.");
@@ -143,7 +145,7 @@ namespace MCPForUnityTests.Editor.Tools
         public void ReadRendererData_DoesNotInstantiateMaterial_AndIncludesSharedMaterial()
         {
             // Prepare object and assignment
-            AssignMaterial_ToSphere_UsingComponentPropertiesObject_Succeeds();
+            AssignMaterial_ToSphere_UsingManageMaterial_Succeeds();
 
             var renderer = _sphere.GetComponent<MeshRenderer>();
             int beforeId = renderer.sharedMaterial != null ? renderer.sharedMaterial.GetInstanceID() : 0;

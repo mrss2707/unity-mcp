@@ -1,40 +1,41 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using MCPForUnity.Editor.Constants;
+using MCPForUnity.Editor.Services;
+using MCPForUnity.Editor.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using MCPForUnity.Editor.Models;
+using UnityEditor;
+using UnityEngine;
 
 namespace MCPForUnity.Editor.Helpers
 {
     public static class ConfigJsonBuilder
     {
-        public static string BuildManualConfigJson(string uvPath, string pythonDir, McpClient client)
+        public static string BuildManualConfigJson(string uvPath, McpClient client)
         {
             var root = new JObject();
-            bool isVSCode = client?.mcpType == McpTypes.VSCode;
-            JObject container;
-            if (isVSCode)
-            {
-                container = EnsureObject(root, "servers");
-            }
-            else
-            {
-                container = EnsureObject(root, "mcpServers");
-            }
+            bool isVSCode = client?.IsVsCodeLayout == true;
+            if (!string.IsNullOrEmpty(client?.SchemaUrl)) root["$schema"] = client.SchemaUrl;
+            JObject container = EnsureObject(root, GetContainerKey(client, isVSCode));
 
             var unity = new JObject();
-            PopulateUnityNode(unity, uvPath, pythonDir, client, isVSCode);
+            PopulateUnityNode(unity, uvPath, client, isVSCode);
 
             container["unityMCP"] = unity;
 
             return root.ToString(Formatting.Indented);
         }
 
-        public static JObject ApplyUnityServerToExistingConfig(JObject root, string uvPath, string serverSrc, McpClient client)
+        public static JObject ApplyUnityServerToExistingConfig(JObject root, string uvPath, McpClient client)
         {
             if (root == null) root = new JObject();
-            bool isVSCode = client?.mcpType == McpTypes.VSCode;
-            JObject container = isVSCode ? EnsureObject(root, "servers") : EnsureObject(root, "mcpServers");
+            bool isVSCode = client?.IsVsCodeLayout == true;
+            if (!string.IsNullOrEmpty(client?.SchemaUrl) && root["$schema"] == null) root["$schema"] = client.SchemaUrl;
+            JObject container = EnsureObject(root, GetContainerKey(client, isVSCode));
             JObject unity = container["unityMCP"] as JObject ?? new JObject();
-            PopulateUnityNode(unity, uvPath, serverSrc, client, isVSCode);
+            PopulateUnityNode(unity, uvPath, client, isVSCode);
 
             container["unityMCP"] = unity;
             return root;
@@ -42,80 +43,112 @@ namespace MCPForUnity.Editor.Helpers
 
         /// <summary>
         /// Centralized builder that applies all caveats consistently.
-        /// - Sets command/args with provided directory
+        /// - Sets command/args with uvx and package version
         /// - Ensures env exists
-        /// - Adds type:"stdio" for VSCode
+        /// - Adds transport configuration (HTTP or stdio)
         /// - Adds disabled:false for Windsurf/Kiro only when missing
         /// </summary>
-        private static void PopulateUnityNode(JObject unity, string uvPath, string directory, McpClient client, bool isVSCode)
+        private static void PopulateUnityNode(JObject unity, string uvPath, McpClient client, bool isVSCode)
         {
-            unity["command"] = uvPath;
+            // Get transport preference (default to HTTP)
+            bool prefValue = EditorConfigurationCache.Instance.UseHttpTransport;
+            bool clientSupportsHttp = client?.SupportsHttpTransport != false;
+            bool useHttpTransport = clientSupportsHttp && prefValue;
+            string httpProperty = string.IsNullOrEmpty(client?.HttpUrlProperty) ? "url" : client.HttpUrlProperty;
+            var urlPropsToRemove = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "url", "serverUrl" };
+            urlPropsToRemove.Remove(httpProperty);
 
-            // For Cursor (non-VSCode) on macOS, prefer a no-spaces symlink path to avoid arg parsing issues in some runners
-            string effectiveDir = directory;
-#if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
-            bool isCursor = !isVSCode && (client == null || client.mcpType != McpTypes.VSCode);
-            if (isCursor && !string.IsNullOrEmpty(directory))
+            if (useHttpTransport)
             {
-                // Replace canonical path segment with the symlink path if present
-                const string canonical = "/Library/Application Support/";
-                const string symlinkSeg = "/Library/AppSupport/";
-                try
+                // HTTP mode: Use URL, no command
+                string httpUrl = HttpEndpointUtility.GetMcpRpcUrl();
+                unity[httpProperty] = httpUrl;
+
+                foreach (var prop in urlPropsToRemove)
                 {
-                    // Normalize to full path style
-                    if (directory.Contains(canonical))
+                    if (unity[prop] != null) unity.Remove(prop);
+                }
+
+                // Remove command/args if they exist from previous config
+                if (unity["command"] != null) unity.Remove("command");
+                if (unity["args"] != null) unity.Remove("args");
+
+                // Only include API key header for remote-hosted mode
+                if (HttpEndpointUtility.IsRemoteScope())
+                {
+                    string apiKey = EditorPrefs.GetString(EditorPrefKeys.ApiKey, string.Empty);
+                    if (!string.IsNullOrEmpty(apiKey))
                     {
-                        var candidate = directory.Replace(canonical, symlinkSeg).Replace('\\', '/');
-                        if (System.IO.Directory.Exists(candidate))
-                        {
-                            effectiveDir = candidate;
-                        }
+                        var headers = new JObject { [AuthConstants.ApiKeyHeader] = apiKey };
+                        unity["headers"] = headers;
                     }
                     else
                     {
-                        // If installer returned XDG-style on macOS, map to canonical symlink
-                        string norm = directory.Replace('\\', '/');
-                        int idx = norm.IndexOf("/.local/share/UnityMCP/", System.StringComparison.Ordinal);
-                        if (idx >= 0)
-                        {
-                            string home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal) ?? string.Empty;
-                            string suffix = norm.Substring(idx + "/.local/share/".Length); // UnityMCP/...
-                            string candidate = System.IO.Path.Combine(home, "Library", "AppSupport", suffix).Replace('\\', '/');
-                            if (System.IO.Directory.Exists(candidate))
-                            {
-                                effectiveDir = candidate;
-                            }
-                        }
+                        if (unity["headers"] != null) unity.Remove("headers");
                     }
                 }
-                catch { /* fallback to original directory on any error */ }
-            }
-#endif
+                else
+                {
+                    // Local HTTP doesn't use API keys; remove any stale headers
+                    if (unity["headers"] != null) unity.Remove("headers");
+                }
 
-            unity["args"] = JArray.FromObject(new[] { "run", "--directory", effectiveDir, "server.py" });
-
-            if (isVSCode)
-            {
-                unity["type"] = "stdio";
+                // Per-client override of the HTTP "type" value: Cline/Roo expect "streamableHttp"
+                // and Kilo expects "remote"; both fall back to stdio when they see the generic
+                // "http". Defaults to "http" (standard MCP protocol field) when unset, so clients
+                // don't default to SSE on seeing a URL without a type.
+                unity["type"] = string.IsNullOrEmpty(client?.HttpTypeValue) ? "http" : client.HttpTypeValue;
             }
             else
             {
-                // Remove type if it somehow exists from previous clients
-                if (unity["type"] != null) unity.Remove("type");
+                // Stdio mode: Use uvx command
+                var (uvxPath, fromUrl, packageName) = AssetPathUtility.GetUvxCommandParts();
+
+                var toolArgs = BuildUvxArgs(fromUrl, packageName);
+
+                unity["command"] = uvxPath;
+                unity["args"] = JArray.FromObject(toolArgs.ToArray());
+
+                // Remove url/serverUrl if they exist from previous config
+                if (unity["url"] != null) unity.Remove("url");
+                if (unity["serverUrl"] != null) unity.Remove("serverUrl");
+
+                // Include type for all clients — standard MCP protocol field. A few clients use a
+                // different token for local transport (e.g. Kilo uses "local").
+                unity["type"] = string.IsNullOrEmpty(client?.StdioTypeValue) ? "stdio" : client.StdioTypeValue;
             }
 
-            if (client != null && (client.mcpType == McpTypes.Windsurf || client.mcpType == McpTypes.Kiro))
+            bool requiresEnv = client?.EnsureEnvObject == true;
+            bool stripEnv = client?.StripEnvWhenNotRequired == true;
+
+            if (requiresEnv)
             {
                 if (unity["env"] == null)
                 {
                     unity["env"] = new JObject();
                 }
+            }
+            else if (stripEnv && unity["env"] != null)
+            {
+                unity.Remove("env");
+            }
 
-                if (unity["disabled"] == null)
+            if (client?.DefaultUnityFields != null)
+            {
+                foreach (var kvp in client.DefaultUnityFields)
                 {
-                    unity["disabled"] = false;
+                    if (unity[kvp.Key] == null)
+                    {
+                        unity[kvp.Key] = kvp.Value != null ? JToken.FromObject(kvp.Value) : JValue.CreateNull();
+                    }
                 }
             }
+        }
+
+        private static string GetContainerKey(McpClient client, bool isVSCode)
+        {
+            if (isVSCode) return "servers";
+            return string.IsNullOrEmpty(client?.ServerContainerKey) ? "mcpServers" : client.ServerContainerKey;
         }
 
         private static JObject EnsureObject(JObject parent, string name)
@@ -125,5 +158,30 @@ namespace MCPForUnity.Editor.Helpers
             parent[name] = created;
             return created;
         }
+
+        private static IList<string> BuildUvxArgs(string fromUrl, string packageName)
+        {
+            // Dev mode: force a fresh install/resolution (avoids stale cached builds while iterating).
+            // `--no-cache` avoids reading from cache; `--refresh` ensures metadata is revalidated.
+            // Note: --reinstall is not supported by uvx and will cause a warning.
+            // Keep ordering consistent with other uvx builders: dev flags first, then --from <url>, then package name.
+            var args = new List<string>();
+
+            foreach (var flag in AssetPathUtility.GetUvxDevFlagsList())
+                args.Add(flag);
+
+            // Use centralized helper for beta server / prerelease args
+            foreach (var arg in AssetPathUtility.GetBetaServerFromArgsList())
+            {
+                args.Add(arg);
+            }
+            args.Add(packageName);
+
+            args.Add("--transport");
+            args.Add("stdio");
+
+            return args;
+        }
+
     }
 }

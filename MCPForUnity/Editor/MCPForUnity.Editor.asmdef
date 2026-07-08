@@ -2,18 +2,24 @@
     "name": "MCPForUnity.Editor",
     "rootNamespace": "MCPForUnity.Editor",
     "references": [
-        "MCPForUnity.Runtime",
-        "GUID:560b04d1a97f54a46a2660c3cc343a6f" 
+        "MCPForUnity.Runtime"
     ],
     "includePlatforms": [
         "Editor"
     ],
     "excludePlatforms": [],
-    "allowUnsafeCode": false,
-    "overrideReferences": false,
-    "precompiledReferences": [],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.visualeffectgraph",
+            "expression": "0.0.0",
+            "define": "UNITY_VFX_GRAPH"
+        }
+    ],
     "noEngineReferences": false
-} 
+}

@@ -6,87 +6,72 @@ namespace MCPForUnity.Editor.Services
     public interface IPathResolverService
     {
         /// <summary>
-        /// Gets the MCP server path (respects override if set)
+        /// Gets the uvx package manager path (respects override if set)
         /// </summary>
-        /// <returns>Path to the MCP server directory containing server.py, or null if not found</returns>
-        string GetMcpServerPath();
-        
-        /// <summary>
-        /// Gets the UV package manager path (respects override if set)
-        /// </summary>
-        /// <returns>Path to the uv executable, or null if not found</returns>
-        string GetUvPath();
-        
+        /// <returns>Path to the uvx executable, or null if not found</returns>
+        string GetUvxPath();
+
         /// <summary>
         /// Gets the Claude CLI path (respects override if set)
         /// </summary>
         /// <returns>Path to the claude executable, or null if not found</returns>
         string GetClaudeCliPath();
-        
+
         /// <summary>
         /// Checks if Python is detected on the system
         /// </summary>
         /// <returns>True if Python is found</returns>
         bool IsPythonDetected();
-        
-        /// <summary>
-        /// Checks if UV is detected on the system
-        /// </summary>
-        /// <returns>True if UV is found</returns>
-        bool IsUvDetected();
-        
+
         /// <summary>
         /// Checks if Claude CLI is detected on the system
         /// </summary>
         /// <returns>True if Claude CLI is found</returns>
         bool IsClaudeCliDetected();
-        
+
         /// <summary>
-        /// Sets an override for the MCP server path
+        /// Sets an override for the uvx path
         /// </summary>
         /// <param name="path">Path to override with</param>
-        void SetMcpServerOverride(string path);
-        
-        /// <summary>
-        /// Sets an override for the UV path
-        /// </summary>
-        /// <param name="path">Path to override with</param>
-        void SetUvPathOverride(string path);
-        
+        void SetUvxPathOverride(string path);
+
         /// <summary>
         /// Sets an override for the Claude CLI path
         /// </summary>
         /// <param name="path">Path to override with</param>
         void SetClaudeCliPathOverride(string path);
-        
+
         /// <summary>
-        /// Clears the MCP server path override
+        /// Clears the uvx path override
         /// </summary>
-        void ClearMcpServerOverride();
-        
-        /// <summary>
-        /// Clears the UV path override
-        /// </summary>
-        void ClearUvPathOverride();
-        
+        void ClearUvxPathOverride();
+
         /// <summary>
         /// Clears the Claude CLI path override
         /// </summary>
         void ClearClaudeCliPathOverride();
-        
+
         /// <summary>
-        /// Gets whether a MCP server path override is active
+        /// Gets whether a uvx path override is active
         /// </summary>
-        bool HasMcpServerOverride { get; }
-        
-        /// <summary>
-        /// Gets whether a UV path override is active
-        /// </summary>
-        bool HasUvPathOverride { get; }
-        
+        bool HasUvxPathOverride { get; }
+
         /// <summary>
         /// Gets whether a Claude CLI path override is active
         /// </summary>
         bool HasClaudeCliPathOverride { get; }
+
+        /// <summary>
+        /// Gets whether the uvx path used a fallback from override to system path
+        /// </summary>
+        bool HasUvxPathFallback { get; }
+
+        /// <summary>
+        /// Validates the provided uv executable by running "--version" and parsing the output.
+        /// </summary>
+        /// <param name="uvPath">Absolute or relative path to the uv/uvx executable.</param>
+        /// <param name="version">Parsed version string if successful.</param>
+        /// <returns>True when the executable runs and returns a uv version string.</returns>
+        bool TryValidateUvxExecutable(string uvPath, out string version);
     }
 }

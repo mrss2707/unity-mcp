@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using MCPForUnity.Editor.Helpers; // For Response class
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
-using MCPForUnity.Editor.Helpers; // For Response class
 
 namespace MCPForUnity.Editor.Tools
 {
@@ -14,7 +14,7 @@ namespace MCPForUnity.Editor.Tools
     /// Handles reading and clearing Unity Editor console log entries.
     /// Uses reflection to access internal LogEntry methods/properties.
     /// </summary>
-    [McpForUnityTool("read_console")]
+    [McpForUnityTool("read_console", AutoRegister = false)]
     public static class ReadConsole
     {
         // (Calibration removed)
@@ -30,10 +30,7 @@ namespace MCPForUnity.Editor.Tools
         private static FieldInfo _messageField;
         private static FieldInfo _fileField;
         private static FieldInfo _lineField;
-        private static FieldInfo _instanceIdField;
-
-        // Note: Timestamp is not directly available in LogEntry; need to parse message or find alternative?
-
+    
         // Static constructor for reflection setup
         static ReadConsole()
         {
@@ -102,16 +99,12 @@ namespace MCPForUnity.Editor.Tools
                 if (_lineField == null)
                     throw new Exception("Failed to reflect LogEntry.line");
 
-                _instanceIdField = logEntryType.GetField("instanceID", instanceFlags);
-                if (_instanceIdField == null)
-                    throw new Exception("Failed to reflect LogEntry.instanceID");
-
                 // (Calibration removed)
 
             }
             catch (Exception e)
             {
-                Debug.LogError(
+                McpLog.Error(
                     $"[ReadConsole] Static Initialization Failed: Could not setup reflection for LogEntries/LogEntry. Console reading/clearing will likely fail. Specific Error: {e.Message}"
                 );
                 // Set members to null to prevent NullReferenceExceptions later, HandleCommand should check this.
@@ -121,7 +114,7 @@ namespace MCPForUnity.Editor.Tools
                     _getCountMethod =
                     _getEntryMethod =
                         null;
-                _modeField = _messageField = _fileField = _lineField = _instanceIdField = null;
+                _modeField = _messageField = _fileField = _lineField = null;
             }
         }
 
@@ -140,19 +133,24 @@ namespace MCPForUnity.Editor.Tools
                 || _messageField == null
                 || _fileField == null
                 || _lineField == null
-                || _instanceIdField == null
             )
             {
                 // Log the error here as well for easier debugging in Unity Console
-                Debug.LogError(
+                McpLog.Error(
                     "[ReadConsole] HandleCommand called but reflection members are not initialized. Static constructor might have failed silently or there's an issue."
                 );
-                return Response.Error(
+                return new ErrorResponse(
                     "ReadConsole handler failed to initialize due to reflection errors. Cannot access console logs."
                 );
             }
 
-            string action = @params["action"]?.ToString().ToLower() ?? "get";
+            if (@params == null)
+            {
+                return new ErrorResponse("Parameters cannot be null.");
+            }
+
+            var p = new ToolParams(@params);
+            string action = p.Get("action", "get").ToLower();
 
             try
             {
@@ -164,41 +162,41 @@ namespace MCPForUnity.Editor.Tools
                 {
                     // Extract parameters for 'get'
                     var types =
-                        (@params["types"] as JArray)?.Select(t => t.ToString().ToLower()).ToList()
-                        ?? new List<string> { "error", "warning", "log" };
-                    int? count = @params["count"]?.ToObject<int?>();
-                    string filterText = @params["filterText"]?.ToString();
-                    string sinceTimestampStr = @params["sinceTimestamp"]?.ToString(); // TODO: Implement timestamp filtering
-                    string format = (@params["format"]?.ToString() ?? "detailed").ToLower();
-                    bool includeStacktrace =
-                        @params["includeStacktrace"]?.ToObject<bool?>() ?? true;
+                        (p.GetRaw("types") as JArray)?.Select(t => t.ToString().ToLower()).ToList()
+                        ?? new List<string> { "error", "warning" };
+                    int? count = p.GetInt("count");
+                    int? pageSize = p.GetInt("pageSize");
+                    int? cursor = p.GetInt("cursor");
+                    string filterText = p.Get("filterText");
+                    string format = p.Get("format", "plain").ToLower();
+                    bool includeStacktrace = p.GetBool("includeStacktrace", false);
 
                     if (types.Contains("all"))
                     {
                         types = new List<string> { "error", "warning", "log" }; // Expand 'all'
                     }
 
-                    if (!string.IsNullOrEmpty(sinceTimestampStr))
-                    {
-                        Debug.LogWarning(
-                            "[ReadConsole] Filtering by 'since_timestamp' is not currently implemented."
-                        );
-                        // Need a way to get timestamp per log entry.
-                    }
-
-                    return GetConsoleEntries(types, count, filterText, format, includeStacktrace);
+                    return GetConsoleEntries(
+                        types,
+                        count,
+                        pageSize,
+                        cursor,
+                        filterText,
+                        format,
+                        includeStacktrace
+                    );
                 }
                 else
                 {
-                    return Response.Error(
+                    return new ErrorResponse(
                         $"Unknown action: '{action}'. Valid actions are 'get' or 'clear'."
                     );
                 }
             }
             catch (Exception e)
             {
-                Debug.LogError($"[ReadConsole] Action '{action}' failed: {e}");
-                return Response.Error($"Internal error processing action '{action}': {e.Message}");
+                McpLog.Error($"[ReadConsole] Action '{action}' failed: {e}");
+                return new ErrorResponse($"Internal error processing action '{action}': {e.Message}");
             }
         }
 
@@ -209,18 +207,31 @@ namespace MCPForUnity.Editor.Tools
             try
             {
                 _clearMethod.Invoke(null, null); // Static method, no instance, no parameters
-                return Response.Success("Console cleared successfully.");
+                return new SuccessResponse("Console cleared successfully.");
             }
             catch (Exception e)
             {
-                Debug.LogError($"[ReadConsole] Failed to clear console: {e}");
-                return Response.Error($"Failed to clear console: {e.Message}");
+                McpLog.Error($"[ReadConsole] Failed to clear console: {e}");
+                return new ErrorResponse($"Failed to clear console: {e.Message}");
             }
         }
 
+        /// <summary>
+        /// Retrieves console log entries with optional filtering and paging.
+        /// </summary>
+        /// <param name="types">Log types to include (e.g., "error", "warning", "log").</param>
+        /// <param name="count">Maximum entries to return in non-paging mode. Ignored when paging is active.</param>
+        /// <param name="pageSize">Number of entries per page. Defaults to 50 when omitted.</param>
+        /// <param name="cursor">Starting index for paging (0-based). Defaults to 0.</param>
+        /// <param name="filterText">Optional text filter (case-insensitive substring match).</param>
+        /// <param name="format">Output format: "plain", "detailed", or "json".</param>
+        /// <param name="includeStacktrace">Whether to include stack traces in the output.</param>
+        /// <returns>A success response with entries, or an error response.</returns>
         private static object GetConsoleEntries(
             List<string> types,
             int? count,
+            int? pageSize,
+            int? cursor,
             string filterText,
             string format,
             bool includeStacktrace
@@ -228,13 +239,22 @@ namespace MCPForUnity.Editor.Tools
         {
             List<object> formattedEntries = new List<object>();
             int retrievedCount = 0;
+            int totalMatches = 0;
+            bool usePaging = pageSize.HasValue || cursor.HasValue;
+            // pageSize defaults to 50 when omitted; count is the overall non-paging limit only
+            int resolvedPageSize = Mathf.Clamp(pageSize ?? 50, 1, 500);
+            int resolvedCursor = Mathf.Max(0, cursor ?? 0);
+            int pageEndExclusive = resolvedCursor + resolvedPageSize;
 
             try
             {
-                // LogEntries requires calling Start/Stop around GetEntries/GetEntryInternal
-                _startGettingEntriesMethod.Invoke(null, null);
-
-                int totalEntries = (int)_getCountMethod.Invoke(null, null);
+                // LogEntries requires calling Start/Stop around GetEntries/GetEntryInternal.
+                // StartGettingEntries() returns the entry count — use it instead of GetCount()
+                // which may return stale values within an active iteration session.
+                object startResult = _startGettingEntriesMethod.Invoke(null, null);
+                int totalEntries = startResult is int startCount
+                    ? startCount
+                    : (int)_getCountMethod.Invoke(null, null);
                 // Create instance to pass to GetEntryInternal - Ensure the type is correct
                 Type logEntryType = typeof(EditorApplication).Assembly.GetType(
                     "UnityEditor.LogEntry"
@@ -256,7 +276,6 @@ namespace MCPForUnity.Editor.Tools
                     string file = (string)_fileField.GetValue(logEntryInstance);
 
                     int line = (int)_lineField.GetValue(logEntryInstance);
-                    // int instanceId = (int)_instanceIdField.GetValue(logEntryInstance);
 
                     if (string.IsNullOrEmpty(message))
                     {
@@ -300,8 +319,6 @@ namespace MCPForUnity.Editor.Tools
                         continue;
                     }
 
-                    // TODO: Filter by timestamp (requires timestamp data)
-
                     // --- Formatting ---
                     string stackTrace = includeStacktrace ? ExtractStackTrace(message) : null;
                     // Always get first line for the message, use full message only if no stack trace exists
@@ -332,34 +349,45 @@ namespace MCPForUnity.Editor.Tools
                                 message = messageOnly,
                                 file = file,
                                 line = line,
-                                // timestamp = "", // TODO
                                 stackTrace = stackTrace, // Will be null if includeStacktrace is false or no stack found
                             };
                             break;
                     }
 
-                    formattedEntries.Add(formattedEntry);
-                    retrievedCount++;
+                    totalMatches++;
 
-                    // Apply count limit (after filtering)
-                    if (count.HasValue && retrievedCount >= count.Value)
+                    if (usePaging)
                     {
-                        break;
+                        if (totalMatches > resolvedCursor && totalMatches <= pageEndExclusive)
+                        {
+                            formattedEntries.Add(formattedEntry);
+                            retrievedCount++;
+                        }
+                        // Early exit: we've filled the page and only need to check if more exist
+                        else if (totalMatches > pageEndExclusive)
+                        {
+                            // We've passed the page; totalMatches now indicates truncation
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        formattedEntries.Add(formattedEntry);
+                        retrievedCount++;
+
+                        // Apply count limit (after filtering)
+                        if (count.HasValue && retrievedCount >= count.Value)
+                        {
+                            break;
+                        }
                     }
                 }
             }
             catch (Exception e)
             {
-                Debug.LogError($"[ReadConsole] Error while retrieving log entries: {e}");
-                // Ensure EndGettingEntries is called even if there's an error during iteration
-                try
-                {
-                    _endGettingEntriesMethod.Invoke(null, null);
-                }
-                catch
-                { /* Ignore nested exception */
-                }
-                return Response.Error($"Error retrieving log entries: {e.Message}");
+                McpLog.Error($"[ReadConsole] Error while retrieving log entries: {e}");
+                // EndGettingEntries will be called in the finally block
+                return new ErrorResponse($"Error retrieving log entries: {e.Message}");
             }
             finally
             {
@@ -370,13 +398,33 @@ namespace MCPForUnity.Editor.Tools
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[ReadConsole] Failed to call EndGettingEntries: {e}");
+                    McpLog.Error($"[ReadConsole] Failed to call EndGettingEntries: {e}");
                     // Don't return error here as we might have valid data, but log it.
                 }
             }
 
+            if (usePaging)
+            {
+                bool truncated = totalMatches > pageEndExclusive;
+                string nextCursor = truncated ? pageEndExclusive.ToString() : null;
+                var payload = new
+                {
+                    cursor = resolvedCursor,
+                    pageSize = resolvedPageSize,
+                    nextCursor = nextCursor,
+                    truncated = truncated,
+                    total = totalMatches,
+                    items = formattedEntries,
+                };
+
+                return new SuccessResponse(
+                    $"Retrieved {formattedEntries.Count} log entries.",
+                    payload
+                );
+            }
+
             // Return the filtered and formatted list (might be empty)
-            return Response.Success(
+            return new SuccessResponse(
                 $"Retrieved {formattedEntries.Count} log entries.",
                 formattedEntries
             );
@@ -447,29 +495,6 @@ namespace MCPForUnity.Editor.Tools
             if (fullMessage.IndexOf("Debug:Log (", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             if (fullMessage.IndexOf("UnityEngine.Debug:Log (", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
-        }
-
-        /// <summary>
-        /// Applies the "one level lower" remapping for filtering, like the old version.
-        /// This ensures compatibility with the filtering logic that expects remapped types.
-        /// </summary>
-        private static LogType GetRemappedTypeForFiltering(LogType unityType)
-        {
-            switch (unityType)
-            {
-                case LogType.Error:
-                    return LogType.Warning; // Error becomes Warning
-                case LogType.Warning:
-                    return LogType.Log; // Warning becomes Log
-                case LogType.Assert:
-                    return LogType.Assert; // Assert remains Assert
-                case LogType.Log:
-                    return LogType.Log; // Log remains Log
-                case LogType.Exception:
-                    return LogType.Warning; // Exception becomes Warning
-                default:
-                    return LogType.Log; // Default fallback
-            }
         }
 
         /// <summary>

@@ -1,26 +1,46 @@
 using System;
 using System.Net;
+using System.Text.RegularExpressions;
+using MCPForUnity.Editor.Constants;
 using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace MCPForUnity.Editor.Services
 {
     /// <summary>
-    /// Service for checking package updates from GitHub
+    /// Service for checking package updates from GitHub or Asset Store metadata
     /// </summary>
     public class PackageUpdateService : IPackageUpdateService
     {
-        private const string LastCheckDateKey = "MCPForUnity.LastUpdateCheck";
-        private const string CachedVersionKey = "MCPForUnity.LatestKnownVersion";
-        private const string PackageJsonUrl = "https://raw.githubusercontent.com/CoplayDev/unity-mcp/main/MCPForUnity/package.json";
+        private const int DefaultRequestTimeoutMs = 3000;
+        private const string LastCheckDateKey = EditorPrefKeys.LastUpdateCheck;
+        private const string CachedVersionKey = EditorPrefKeys.LatestKnownVersion;
+        private const string LastBetaCheckDateKey = EditorPrefKeys.LastUpdateCheck + ".beta";
+        private const string CachedBetaVersionKey = EditorPrefKeys.LatestKnownVersion + ".beta";
+        private const string LastAssetStoreCheckDateKey = EditorPrefKeys.LastAssetStoreUpdateCheck;
+        private const string CachedAssetStoreVersionKey = EditorPrefKeys.LatestKnownAssetStoreVersion;
+        private const string MainPackageJsonUrl = "https://raw.githubusercontent.com/CoplayDev/unity-mcp/main/MCPForUnity/package.json";
+        private const string BetaPackageJsonUrl = "https://raw.githubusercontent.com/CoplayDev/unity-mcp/beta/MCPForUnity/package.json";
+        private const string AssetStoreVersionUrl = "https://gqoqjkkptwfbkwyssmnj.supabase.co/storage/v1/object/public/coplay-images/assetstoreversion.json";
 
         /// <inheritdoc/>
         public UpdateCheckResult CheckForUpdate(string currentVersion)
         {
-            // Check cache first - only check once per day
-            string lastCheckDate = EditorPrefs.GetString(LastCheckDateKey, "");
-            string cachedLatestVersion = EditorPrefs.GetString(CachedVersionKey, "");
+            bool isGitInstallation = IsGitInstallation();
+            string gitBranch = isGitInstallation ? GetGitUpdateBranch(currentVersion) : "main";
+            bool useBetaChannel = isGitInstallation && string.Equals(gitBranch, "beta", StringComparison.OrdinalIgnoreCase);
+
+            string lastCheckKey = isGitInstallation
+                ? (useBetaChannel ? LastBetaCheckDateKey : LastCheckDateKey)
+                : LastAssetStoreCheckDateKey;
+            string cachedVersionKey = isGitInstallation
+                ? (useBetaChannel ? CachedBetaVersionKey : CachedVersionKey)
+                : CachedAssetStoreVersionKey;
+
+            string lastCheckDate = EditorPrefs.GetString(lastCheckKey, "");
+            string cachedLatestVersion = EditorPrefs.GetString(cachedVersionKey, "");
 
             if (lastCheckDate == DateTime.Now.ToString("yyyy-MM-dd") && !string.IsNullOrEmpty(cachedLatestVersion))
             {
@@ -33,25 +53,15 @@ namespace MCPForUnity.Editor.Services
                 };
             }
 
-            // Don't check for Asset Store installations
-            if (!IsGitInstallation())
-            {
-                return new UpdateCheckResult
-                {
-                    CheckSucceeded = false,
-                    UpdateAvailable = false,
-                    Message = "Asset Store installations are updated via Unity Asset Store"
-                };
-            }
-
-            // Fetch latest version from GitHub
-            string latestVersion = FetchLatestVersionFromGitHub();
+            string latestVersion = isGitInstallation
+                ? FetchLatestVersionFromGitHub(gitBranch)
+                : FetchLatestVersionFromAssetStoreJson();
 
             if (!string.IsNullOrEmpty(latestVersion))
             {
                 // Cache the result
-                EditorPrefs.SetString(LastCheckDateKey, DateTime.Now.ToString("yyyy-MM-dd"));
-                EditorPrefs.SetString(CachedVersionKey, latestVersion);
+                EditorPrefs.SetString(lastCheckKey, DateTime.Now.ToString("yyyy-MM-dd"));
+                EditorPrefs.SetString(cachedVersionKey, latestVersion);
 
                 return new UpdateCheckResult
                 {
@@ -66,41 +76,242 @@ namespace MCPForUnity.Editor.Services
             {
                 CheckSucceeded = false,
                 UpdateAvailable = false,
-                Message = "Failed to check for updates (network issue or offline)"
+                Message = isGitInstallation
+                    ? "Failed to check for updates (network issue or offline)"
+                    : "Failed to check for Asset Store updates (network issue or offline)"
             };
+        }
+
+        /// <inheritdoc/>
+        public UpdateCheckResult TryGetCachedResult(string currentVersion)
+        {
+            bool isGitInstallation = IsGitInstallation();
+            string gitBranch = isGitInstallation ? GetGitUpdateBranch(currentVersion) : "main";
+            bool useBetaChannel = isGitInstallation && string.Equals(gitBranch, "beta", StringComparison.OrdinalIgnoreCase);
+
+            string lastCheckKey = isGitInstallation
+                ? (useBetaChannel ? LastBetaCheckDateKey : LastCheckDateKey)
+                : LastAssetStoreCheckDateKey;
+            string cachedVersionKey = isGitInstallation
+                ? (useBetaChannel ? CachedBetaVersionKey : CachedVersionKey)
+                : CachedAssetStoreVersionKey;
+
+            string lastCheckDate = EditorPrefs.GetString(lastCheckKey, "");
+            string cachedLatestVersion = EditorPrefs.GetString(cachedVersionKey, "");
+
+            if (lastCheckDate == DateTime.Now.ToString("yyyy-MM-dd") && !string.IsNullOrEmpty(cachedLatestVersion))
+            {
+                return new UpdateCheckResult
+                {
+                    CheckSucceeded = true,
+                    LatestVersion = cachedLatestVersion,
+                    UpdateAvailable = IsNewerVersion(cachedLatestVersion, currentVersion),
+                    Message = "Using cached version check"
+                };
+            }
+
+            return null;
+        }
+
+        /// <inheritdoc/>
+        public UpdateCheckResult FetchAndCompare(string currentVersion)
+        {
+            bool isGitInstallation = IsGitInstallation();
+            string gitBranch = isGitInstallation ? GetGitUpdateBranch(currentVersion) : "main";
+            return FetchAndCompare(currentVersion, isGitInstallation, gitBranch);
+        }
+
+        /// <inheritdoc/>
+        public UpdateCheckResult FetchAndCompare(string currentVersion, bool isGitInstallation, string gitBranch)
+        {
+            string latestVersion = isGitInstallation
+                ? FetchLatestVersionFromGitHub(gitBranch)
+                : FetchLatestVersionFromAssetStoreJson();
+
+            if (!string.IsNullOrEmpty(latestVersion))
+            {
+                return new UpdateCheckResult
+                {
+                    CheckSucceeded = true,
+                    LatestVersion = latestVersion,
+                    UpdateAvailable = IsNewerVersion(latestVersion, currentVersion),
+                    Message = "Successfully checked for updates"
+                };
+            }
+
+            return new UpdateCheckResult
+            {
+                CheckSucceeded = false,
+                UpdateAvailable = false,
+                Message = isGitInstallation
+                    ? "Failed to check for updates (network issue or offline)"
+                    : "Failed to check for Asset Store updates (network issue or offline)"
+            };
+        }
+
+        /// <inheritdoc/>
+        public void CacheFetchResult(string currentVersion, string fetchedVersion)
+        {
+            if (string.IsNullOrEmpty(fetchedVersion)) return;
+
+            bool isGitInstallation = IsGitInstallation();
+            string gitBranch = isGitInstallation ? GetGitUpdateBranch(currentVersion) : "main";
+            bool useBetaChannel = isGitInstallation && string.Equals(gitBranch, "beta", StringComparison.OrdinalIgnoreCase);
+
+            string lastCheckKey = isGitInstallation
+                ? (useBetaChannel ? LastBetaCheckDateKey : LastCheckDateKey)
+                : LastAssetStoreCheckDateKey;
+            string cachedVersionKey = isGitInstallation
+                ? (useBetaChannel ? CachedBetaVersionKey : CachedVersionKey)
+                : CachedAssetStoreVersionKey;
+
+            EditorPrefs.SetString(lastCheckKey, DateTime.Now.ToString("yyyy-MM-dd"));
+            EditorPrefs.SetString(cachedVersionKey, fetchedVersion);
         }
 
         /// <inheritdoc/>
         public bool IsNewerVersion(string version1, string version2)
         {
-            try
+            if (!TryParseVersion(version1, out var left) || !TryParseVersion(version2, out var right))
             {
-                // Remove any "v" prefix
-                version1 = version1.TrimStart('v', 'V');
-                version2 = version2.TrimStart('v', 'V');
-
-                var version1Parts = version1.Split('.');
-                var version2Parts = version2.Split('.');
-
-                for (int i = 0; i < Math.Min(version1Parts.Length, version2Parts.Length); i++)
-                {
-                    if (int.TryParse(version1Parts[i], out int v1Num) &&
-                        int.TryParse(version2Parts[i], out int v2Num))
-                    {
-                        if (v1Num > v2Num) return true;
-                        if (v1Num < v2Num) return false;
-                    }
-                }
                 return false;
             }
-            catch
+
+            return CompareVersions(left, right) > 0;
+        }
+
+        private static int CompareVersions(ParsedVersion left, ParsedVersion right)
+        {
+            int cmp = left.Major.CompareTo(right.Major);
+            if (cmp != 0) return cmp;
+
+            cmp = left.Minor.CompareTo(right.Minor);
+            if (cmp != 0) return cmp;
+
+            cmp = left.Patch.CompareTo(right.Patch);
+            if (cmp != 0) return cmp;
+
+            // Stable is newer than prerelease when core version matches.
+            if (!left.IsPrerelease && right.IsPrerelease) return 1;
+            if (left.IsPrerelease && !right.IsPrerelease) return -1;
+            if (!left.IsPrerelease && !right.IsPrerelease) return 0;
+
+            cmp = GetPrereleaseRank(left.PrereleaseLabel).CompareTo(GetPrereleaseRank(right.PrereleaseLabel));
+            if (cmp != 0) return cmp;
+
+            cmp = left.PrereleaseNumber.CompareTo(right.PrereleaseNumber);
+            if (cmp != 0) return cmp;
+
+            return string.Compare(left.PrereleaseLabel, right.PrereleaseLabel, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int GetPrereleaseRank(string label)
+        {
+            if (string.IsNullOrEmpty(label))
             {
-                return false;
+                return 0;
+            }
+
+            switch (label.ToLowerInvariant())
+            {
+                case "a":
+                case "alpha":
+                    return 1;
+                case "b":
+                case "beta":
+                    return 2;
+                case "rc":
+                    return 3;
+                case "preview":
+                case "pre":
+                    return 4;
+                default:
+                    return 5;
             }
         }
 
+        private static bool TryParseVersion(string version, out ParsedVersion parsed)
+        {
+            parsed = default;
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return false;
+            }
+
+            string normalized = version.Trim().TrimStart('v', 'V');
+            var match = Regex.Match(
+                normalized,
+                @"^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<label>[A-Za-z]+)(?:\.(?<number>\d+))?)?$");
+
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            if (!int.TryParse(match.Groups["major"].Value, out int major) ||
+                !int.TryParse(match.Groups["minor"].Value, out int minor) ||
+                !int.TryParse(match.Groups["patch"].Value, out int patch))
+            {
+                return false;
+            }
+
+            string prereleaseLabel = match.Groups["label"].Success ? match.Groups["label"].Value : string.Empty;
+            int prereleaseNumber = 0;
+            if (match.Groups["number"].Success)
+            {
+                int.TryParse(match.Groups["number"].Value, out prereleaseNumber);
+            }
+
+            parsed = new ParsedVersion
+            {
+                Major = major,
+                Minor = minor,
+                Patch = patch,
+                PrereleaseLabel = prereleaseLabel,
+                PrereleaseNumber = prereleaseNumber,
+                IsPrerelease = !string.IsNullOrEmpty(prereleaseLabel)
+            };
+            return true;
+        }
+
+        private static bool IsPreReleaseVersion(string version)
+        {
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return AssetPathUtility.IsPreReleaseVersion();
+            }
+
+            return version.IndexOf('-', StringComparison.Ordinal) >= 0;
+        }
+
         /// <inheritdoc/>
-        public bool IsGitInstallation()
+        public string GetGitUpdateBranch(string currentVersion)
+        {
+            try
+            {
+                var packageInfo = PackageInfo.FindForAssembly(typeof(PackageUpdateService).Assembly);
+                string packageId = packageInfo?.packageId ?? string.Empty;
+
+                if (packageId.IndexOf("#beta", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "beta";
+                }
+
+                if (packageId.IndexOf("#main", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "main";
+                }
+            }
+            catch
+            {
+                // Fall back to version-based inference below.
+            }
+
+            return IsPreReleaseVersion(currentVersion) ? "beta" : "main";
+        }
+
+        /// <inheritdoc/>
+        public virtual bool IsGitInstallation()
         {
             // Git packages are installed via Package Manager and have a package.json in Packages/
             // Asset Store packages are in Assets/
@@ -121,12 +332,16 @@ namespace MCPForUnity.Editor.Services
         {
             EditorPrefs.DeleteKey(LastCheckDateKey);
             EditorPrefs.DeleteKey(CachedVersionKey);
+            EditorPrefs.DeleteKey(LastBetaCheckDateKey);
+            EditorPrefs.DeleteKey(CachedBetaVersionKey);
+            EditorPrefs.DeleteKey(LastAssetStoreCheckDateKey);
+            EditorPrefs.DeleteKey(CachedAssetStoreVersionKey);
         }
 
         /// <summary>
-        /// Fetches the latest version from GitHub's main branch package.json
+        /// Fetches the latest version from GitHub package.json for the requested branch.
         /// </summary>
-        private string FetchLatestVersionFromGitHub()
+        protected virtual string FetchLatestVersionFromGitHub(string branch)
         {
             try
             {
@@ -139,10 +354,13 @@ namespace MCPForUnity.Editor.Services
                 // - More reliable - doesn't require releases to be published
                 // - Direct source of truth from the main branch
 
-                using (var client = new WebClient())
+                using (var client = CreateWebClient())
                 {
                     client.Headers.Add("User-Agent", "Unity-MCPForUnity-UpdateChecker");
-                    string jsonContent = client.DownloadString(PackageJsonUrl);
+                    string packageJsonUrl = string.Equals(branch, "beta", StringComparison.OrdinalIgnoreCase)
+                        ? BetaPackageJsonUrl
+                        : MainPackageJsonUrl;
+                    string jsonContent = client.DownloadString(packageJsonUrl);
 
                     var packageJson = JObject.Parse(jsonContent);
                     string version = packageJson["version"]?.ToString();
@@ -155,6 +373,78 @@ namespace MCPForUnity.Editor.Services
                 // Silent fail - don't interrupt the user if network is unavailable
                 McpLog.Info($"Update check failed (this is normal if offline): {ex.Message}");
                 return null;
+            }
+        }
+
+        private struct ParsedVersion
+        {
+            public int Major;
+            public int Minor;
+            public int Patch;
+            public string PrereleaseLabel;
+            public int PrereleaseNumber;
+            public bool IsPrerelease;
+        }
+
+        /// <summary>
+        /// Fetches the latest Asset Store version from a hosted JSON file.
+        /// </summary>
+        protected virtual string FetchLatestVersionFromAssetStoreJson()
+        {
+            try
+            {
+                using (var client = CreateWebClient())
+                {
+                    client.Headers.Add("User-Agent", "Unity-MCPForUnity-AssetStoreUpdateChecker");
+                    string jsonContent = client.DownloadString(AssetStoreVersionUrl);
+
+                    var versionJson = JObject.Parse(jsonContent);
+                    string version = versionJson["version"]?.ToString();
+
+                    return string.IsNullOrEmpty(version) ? null : version;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Silent fail - don't interrupt the user if network is unavailable
+                McpLog.Info($"Asset Store update check failed (this is normal if offline): {ex.Message}");
+                return null;
+            }
+        }
+
+        protected virtual WebClient CreateWebClient()
+        {
+            return new TimeoutWebClient(GetRequestTimeoutMs());
+        }
+
+        protected virtual int GetRequestTimeoutMs()
+        {
+            return DefaultRequestTimeoutMs;
+        }
+
+        private sealed class TimeoutWebClient : WebClient
+        {
+            private readonly int _timeoutMs;
+
+            public TimeoutWebClient(int timeoutMs)
+            {
+                _timeoutMs = timeoutMs;
+            }
+
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                var request = base.GetWebRequest(address);
+                if (request != null)
+                {
+                    request.Timeout = _timeoutMs;
+
+                    if (request is HttpWebRequest httpRequest)
+                    {
+                        httpRequest.ReadWriteTimeout = _timeoutMs;
+                    }
+                }
+
+                return request;
             }
         }
     }

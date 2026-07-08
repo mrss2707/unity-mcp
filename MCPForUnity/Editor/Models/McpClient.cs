@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace MCPForUnity.Editor.Models
 {
     public class McpClient
@@ -6,9 +8,21 @@ namespace MCPForUnity.Editor.Models
         public string windowsConfigPath;
         public string macConfigPath;
         public string linuxConfigPath;
-        public McpTypes mcpType;
         public string configStatus;
         public McpStatus status = McpStatus.NotConfigured;
+        public ConfiguredTransport configuredTransport = ConfiguredTransport.Unknown;
+
+        // Capability flags/config for JSON-based configurators
+        public bool IsVsCodeLayout; // Whether the config file follows VS Code layout (env object at root)
+        public bool SupportsHttpTransport = true; // Whether the MCP server supports HTTP transport
+        public bool EnsureEnvObject; // Whether to ensure the env object is present in the config
+        public bool StripEnvWhenNotRequired; // Whether to strip the env object when not required
+        public string HttpTypeValue; // Override for the HTTP transport "type" value (null => "http"; Cline/Roo => "streamableHttp"; Kilo => "remote")
+        public string StdioTypeValue; // Override for the stdio transport "type" value (null => "stdio"; Kilo => "local")
+        public string ServerContainerKey; // Top-level JSON container key for servers (null => "mcpServers"; Kilo => "mcp")
+        public string SchemaUrl; // Optional root "$schema" URL written into the config (e.g. Kilo's kilo.jsonc)
+        public string HttpUrlProperty = "url"; // The property name for the HTTP URL in the config
+        public Dictionary<string, object> DefaultUnityFields = new();
 
         // Helper method to convert the enum to a display string
         public string GetStatusDisplayString()
@@ -24,7 +38,8 @@ namespace MCPForUnity.Editor.Models
                 McpStatus.NoResponse => "No Response",
                 McpStatus.UnsupportedOS => "Unsupported OS",
                 McpStatus.MissingConfig => "Missing MCPForUnity Config",
-                McpStatus.Error => configStatus.StartsWith("Error:") ? configStatus : "Error",
+                McpStatus.Error => configStatus?.StartsWith("Error:") == true ? configStatus : "Error",
+                McpStatus.VersionMismatch => "Version Mismatch",
                 _ => "Unknown",
             };
         }
@@ -34,9 +49,9 @@ namespace MCPForUnity.Editor.Models
         {
             status = newStatus;
 
-            if (newStatus == McpStatus.Error && !string.IsNullOrEmpty(errorDetails))
+            if ((newStatus == McpStatus.Error || newStatus == McpStatus.VersionMismatch) && !string.IsNullOrEmpty(errorDetails))
             {
-                configStatus = $"Error: {errorDetails}";
+                configStatus = errorDetails;
             }
             else
             {

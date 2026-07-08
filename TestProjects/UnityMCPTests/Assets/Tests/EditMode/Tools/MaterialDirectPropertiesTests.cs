@@ -5,6 +5,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using MCPForUnity.Editor.Tools;
+using static MCPForUnityTests.Editor.TestUtilities;
 
 namespace MCPForUnityTests.Editor.Tools
 {
@@ -50,6 +51,16 @@ namespace MCPForUnityTests.Editor.Tools
             TryDeleteAsset(_baseMapPath);
             TryDeleteAsset(_normalMapPath);
             TryDeleteAsset(_occlusionMapPath);
+            
+            // Clean up temp directory after each test
+            if (AssetDatabase.IsValidFolder(TempRoot))
+            {
+                AssetDatabase.DeleteAsset(TempRoot);
+            }
+            
+            // Clean up empty parent folders to avoid debris
+            CleanupEmptyParentFolders(TempRoot);
+            
             AssetDatabase.Refresh();
         }
 
@@ -79,11 +90,6 @@ namespace MCPForUnityTests.Editor.Tools
             AssetDatabase.CreateAsset(tex, path);
             AssetDatabase.SaveAssets();
             return tex;
-        }
-
-        private static JObject ToJObject(object result)
-        {
-            return result as JObject ?? JObject.FromObject(result);
         }
 
         [Test]

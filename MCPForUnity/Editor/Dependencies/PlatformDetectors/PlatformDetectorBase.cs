@@ -1,8 +1,7 @@
 using System;
-using System.Diagnostics;
-using System.IO;
 using MCPForUnity.Editor.Dependencies.Models;
 using MCPForUnity.Editor.Helpers;
+using MCPForUnity.Editor.Services;
 
 namespace MCPForUnity.Editor.Dependencies.PlatformDetectors
 {
@@ -16,126 +15,54 @@ namespace MCPForUnity.Editor.Dependencies.PlatformDetectors
 
         public abstract DependencyStatus DetectPython();
         public abstract string GetPythonInstallUrl();
-        public abstract string GetUVInstallUrl();
+        public abstract string GetUvInstallUrl();
         public abstract string GetInstallationRecommendations();
 
-        public virtual DependencyStatus DetectUV()
+        public virtual DependencyStatus DetectUv()
         {
-            var status = new DependencyStatus("UV Package Manager", isRequired: true)
+            var status = new DependencyStatus("uv Package Manager", isRequired: true)
             {
-                InstallationHint = GetUVInstallUrl()
+                InstallationHint = GetUvInstallUrl()
             };
 
             try
             {
-                // Use existing UV detection from ServerInstaller
-                string uvPath = ServerInstaller.FindUvPath();
-                if (!string.IsNullOrEmpty(uvPath))
-                {
-                    if (TryValidateUV(uvPath, out string version))
-                    {
-                        status.IsAvailable = true;
-                        status.Version = version;
-                        status.Path = uvPath;
-                        status.Details = $"Found UV {version} at {uvPath}";
-                        return status;
-                    }
-                }
+                // Get uv path from PathResolverService (respects override)
+                string uvxPath = MCPServiceLocator.Paths.GetUvxPath();
 
-                status.ErrorMessage = "UV package manager not found. Please install UV.";
-                status.Details = "UV is required for managing Python dependencies.";
-            }
-            catch (Exception ex)
-            {
-                status.ErrorMessage = $"Error detecting UV: {ex.Message}";
-            }
-
-            return status;
-        }
-
-        public virtual DependencyStatus DetectMCPServer()
-        {
-            var status = new DependencyStatus("MCP Server", isRequired: false);
-
-            try
-            {
-                // Check if server is installed
-                string serverPath = ServerInstaller.GetServerPath();
-                string serverPy = Path.Combine(serverPath, "server.py");
-
-                if (File.Exists(serverPy))
+                // Verify uv executable and get version
+                if (MCPServiceLocator.Paths.TryValidateUvxExecutable(uvxPath, out string version))
                 {
                     status.IsAvailable = true;
-                    status.Path = serverPath;
+                    status.Version = version;
+                    status.Path = uvxPath;
 
-                    // Try to get version
-                    string versionFile = Path.Combine(serverPath, "server_version.txt");
-                    if (File.Exists(versionFile))
+                    // Check if we used fallback from override to system path
+                    if (MCPServiceLocator.Paths.HasUvxPathFallback)
                     {
-                        status.Version = File.ReadAllText(versionFile).Trim();
-                    }
-
-                    status.Details = $"MCP Server found at {serverPath}";
-                }
-                else
-                {
-                    // Check for embedded server
-                    if (ServerPathResolver.TryFindEmbeddedServerSource(out string embeddedPath))
-                    {
-                        status.IsAvailable = true;
-                        status.Path = embeddedPath;
-                        status.Details = "MCP Server available (embedded in package)";
+                        status.Details = $"Found uv {version} (fallback to system path)";
+                        status.ErrorMessage = "Override path not found, using system path";
                     }
                     else
                     {
-                        status.ErrorMessage = "MCP Server not found";
-                        status.Details = "Server will be installed automatically when needed";
+                        status.Details = MCPServiceLocator.Paths.HasUvxPathOverride
+                            ? $"Found uv {version} (override path)"
+                            : $"Found uv {version} in system path";
                     }
+                    return status;
                 }
+
+                status.ErrorMessage = "uvx not found";
+                status.Details = "Install uv package manager or configure path override in Advanced Settings.";
             }
             catch (Exception ex)
             {
-                status.ErrorMessage = $"Error detecting MCP Server: {ex.Message}";
+                status.ErrorMessage = $"Error detecting uvx: {ex.Message}";
             }
 
             return status;
         }
 
-        protected bool TryValidateUV(string uvPath, out string version)
-        {
-            version = null;
-
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = uvPath,
-                    Arguments = "--version",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                using var process = Process.Start(psi);
-                if (process == null) return false;
-
-                string output = process.StandardOutput.ReadToEnd().Trim();
-                process.WaitForExit(5000);
-
-                if (process.ExitCode == 0 && output.StartsWith("uv "))
-                {
-                    version = output.Substring(3); // Remove "uv " prefix
-                    return true;
-                }
-            }
-            catch
-            {
-                // Ignore validation errors
-            }
-
-            return false;
-        }
 
         protected bool TryParseVersion(string version, out int major, out int minor)
         {
@@ -157,5 +84,54 @@ namespace MCPForUnity.Editor.Dependencies.PlatformDetectors
 
             return false;
         }
+        // In PlatformDetectorBase.cs
+        protected bool TryValidateUvWithPath(string command, string augmentedPath, out string version, out string fullPath)
+        {
+            version = null;
+            fullPath = null;
+
+            try
+            {
+                string commandToRun = command;
+                if (TryFindInPath(command, out string resolvedPath))
+                {
+                    commandToRun = resolvedPath;
+                }
+
+                if (!ExecPath.TryRun(commandToRun, "--version", null, out string stdout, out string stderr,
+                    5000, augmentedPath))
+                    return false;
+
+                string output = string.IsNullOrWhiteSpace(stdout) ? stderr.Trim() : stdout.Trim();
+
+                if (output.StartsWith("uvx ") || output.StartsWith("uv "))
+                {
+                    int spaceIndex = output.IndexOf(' ');
+                    if (spaceIndex >= 0)
+                    {
+                        var remainder = output.Substring(spaceIndex + 1).Trim();
+                        int nextSpace = remainder.IndexOf(' ');
+                        int parenIndex = remainder.IndexOf('(');
+                        int endIndex = Math.Min(
+                            nextSpace >= 0 ? nextSpace : int.MaxValue,
+                            parenIndex >= 0 ? parenIndex : int.MaxValue
+                        );
+                        version = endIndex < int.MaxValue ? remainder.Substring(0, endIndex).Trim() : remainder;
+                        fullPath = commandToRun;
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore validation errors
+            }
+
+            return false;
+        }
+        
+
+        // Add abstract method for subclasses to implement
+        protected abstract bool TryFindInPath(string executable, out string fullPath);
     }
 }

@@ -103,3 +103,10 @@ InitTestScene*.unity*
 .windsurf
 .claude
 .DS_Store
+boot.config
+
+# Runtime artifacts generated when running the MCP bridge / UIToolkit in this test project
+/[Aa]ssets/UnityMCP/
+/[Aa]ssets/UnityMCP.meta
+/[Aa]ssets/UI/
+/[Aa]ssets/UI.meta

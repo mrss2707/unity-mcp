@@ -1,12 +1,13 @@
 using System;
 using System.IO;
-using UnityEditor;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using MCPForUnity.Editor.Constants;
 using Newtonsoft.Json;
+using UnityEditor;
 using UnityEngine;
 
 namespace MCPForUnity.Editor.Helpers
@@ -18,7 +19,7 @@ namespace MCPForUnity.Editor.Helpers
     {
         private static bool IsDebugEnabled()
         {
-            try { return EditorPrefs.GetBool("MCPForUnity.DebugLogs", false); }
+            try { return EditorPrefs.GetBool(EditorPrefKeys.DebugLogs, false); }
             catch { return false; }
         }
 
@@ -35,39 +36,20 @@ namespace MCPForUnity.Editor.Helpers
         }
 
         /// <summary>
-        /// Get the port to use - either from storage or discover a new one
-        /// Will try stored port first, then fallback to discovering new port
+        /// Get the port to use from storage, or return the default if none has been saved yet.
         /// </summary>
         /// <returns>Port number to use</returns>
         public static int GetPortWithFallback()
         {
-            // Try to load stored port first, but only if it's from the current project
             var storedConfig = GetStoredPortConfig();
             if (storedConfig != null &&
                 storedConfig.unity_port > 0 &&
-                string.Equals(storedConfig.project_path ?? string.Empty, Application.dataPath ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                IsPortAvailable(storedConfig.unity_port))
+                string.Equals(storedConfig.project_path ?? string.Empty, Application.dataPath ?? string.Empty, StringComparison.OrdinalIgnoreCase))
             {
-                if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Using stored port {storedConfig.unity_port} for current project");
                 return storedConfig.unity_port;
             }
 
-            // If stored port exists but is currently busy, wait briefly for release
-            if (storedConfig != null && storedConfig.unity_port > 0)
-            {
-                if (WaitForPortRelease(storedConfig.unity_port, 1500))
-                {
-                    if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Stored port {storedConfig.unity_port} became available after short wait");
-                    return storedConfig.unity_port;
-                }
-                // Prefer sticking to the same port; let the caller handle bind retries/fallbacks
-                return storedConfig.unity_port;
-            }
-
-            // If no valid stored port, find a new one and save it
-            int newPort = FindAvailablePort();
-            SavePort(newPort);
-            return newPort;
+            return DefaultPort;
         }
 
         /// <summary>
@@ -78,8 +60,47 @@ namespace MCPForUnity.Editor.Helpers
         {
             int newPort = FindAvailablePort();
             SavePort(newPort);
-            if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Discovered and saved new port: {newPort}");
+            if (IsDebugEnabled()) McpLog.Info($"Discovered and saved new port: {newPort}");
             return newPort;
+        }
+
+        /// <summary>
+        /// How long the configured port may keep returning AddressAlreadyInUse before the
+        /// bridge gives up on it and discovers a new one. The common cause of a transient
+        /// conflict is our own previous listener whose OS socket has not been released yet
+        /// after a domain reload (slower on Windows/macOS); this window covers that race so
+        /// the bridge keeps the configured port instead of stranding the client on the
+        /// orphan (#1173).
+        /// </summary>
+        public const double BusyPortFallbackWindowSeconds = 3.0;
+
+        /// <summary>
+        /// Decide whether a configured port that keeps reporting AddressAlreadyInUse should be
+        /// abandoned for a freshly discovered port. Returns false (keep retrying the same port)
+        /// until it has been continuously busy for <see cref="BusyPortFallbackWindowSeconds"/>,
+        /// which distinguishes a domain-reload socket-release race from a foreign occupant (#1173).
+        /// </summary>
+        public static bool ShouldAbandonBusyPort(double busyForSeconds)
+            => busyForSeconds >= BusyPortFallbackWindowSeconds;
+
+        /// <summary>
+        /// Persist a user-selected port and return the value actually stored.
+        /// If <paramref name="port"/> is unavailable, the next available port is chosen instead.
+        /// </summary>
+        public static int SetPreferredPort(int port)
+        {
+            if (port <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(port), "Port must be positive.");
+            }
+
+            if (!IsPortAvailable(port))
+            {
+                throw new InvalidOperationException($"Port {port} is already in use.");
+            }
+
+            SavePort(port);
+            return port;
         }
 
         /// <summary>
@@ -91,18 +112,18 @@ namespace MCPForUnity.Editor.Helpers
             // Always try default port first
             if (IsPortAvailable(DefaultPort))
             {
-                if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Using default port {DefaultPort}");
+                if (IsDebugEnabled()) McpLog.Info($"Using default port {DefaultPort}");
                 return DefaultPort;
             }
 
-            if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Default port {DefaultPort} is in use, searching for alternative...");
+            if (IsDebugEnabled()) McpLog.Info($"Default port {DefaultPort} is in use, searching for alternative...");
 
             // Search for alternatives
             for (int port = DefaultPort + 1; port < DefaultPort + MaxPortAttempts; port++)
             {
                 if (IsPortAvailable(port))
                 {
-                    if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Found available port {port}");
+                    if (IsDebugEnabled()) McpLog.Info($"Found available port {port}");
                     return port;
                 }
             }
@@ -120,14 +141,21 @@ namespace MCPForUnity.Editor.Helpers
             try
             {
                 var testListener = new TcpListener(IPAddress.Loopback, port);
+#if UNITY_EDITOR_OSX
+                // On macOS, SO_REUSEADDR (the default) lets multiple processes bind the same
+                // port — including AssetImportWorkers. ExclusiveAddressUse prevents this so
+                // the test bind fails when another process already holds the port.
+                try { testListener.Server.ExclusiveAddressUse = true; } catch { }
+#endif
                 testListener.Start();
                 testListener.Stop();
-                return true;
             }
             catch (SocketException)
             {
                 return false;
             }
+
+            return true;
         }
 
         /// <summary>
@@ -211,11 +239,11 @@ namespace MCPForUnity.Editor.Helpers
                 string legacy = Path.Combine(GetRegistryDirectory(), RegistryFileName);
                 File.WriteAllText(legacy, json, new System.Text.UTF8Encoding(false));
 
-                if (IsDebugEnabled()) Debug.Log($"<b><color=#2EA3FF>MCP-FOR-UNITY</color></b>: Saved port {port} to storage");
+                if (IsDebugEnabled()) McpLog.Info($"Saved port {port} to storage");
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"Could not save port to storage: {ex.Message}");
+                McpLog.Warn($"Could not save port to storage: {ex.Message}");
             }
         }
 
@@ -247,7 +275,7 @@ namespace MCPForUnity.Editor.Helpers
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"Could not load port from storage: {ex.Message}");
+                McpLog.Warn($"Could not load port from storage: {ex.Message}");
                 return 0;
             }
         }
@@ -278,7 +306,7 @@ namespace MCPForUnity.Editor.Helpers
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"Could not load port config: {ex.Message}");
+                McpLog.Warn($"Could not load port config: {ex.Message}");
                 return null;
             }
         }

@@ -454,7 +454,29 @@ namespace MCPForUnity.Editor.Tools
                 }
 
                 // Apply packing settings
-#if UNITY_2022_2_OR_NEWER
+                // SpriteAtlas API history:
+                //   Pre-2022.2:  GetPackingSettings() / SetPackingSettings() / Add()
+                //   2022.2-2023: enableRotation etc. direct properties / Add()
+                //   6000.0+:     All removed — use SerializedObject / AssetDatabase.AddObjectToAsset()
+#if UNITY_6000_0_OR_NEWER
+                var packingToken = p.GetRaw("packingSettings") as JObject;
+                if (packingToken != null)
+                {
+                    using (var atlasSo = new SerializedObject(atlas))
+                    {
+                        var enableRotationProp = atlasSo.FindProperty("m_EnableRotation");
+                        var enableTightPackingProp = atlasSo.FindProperty("m_EnableTightPacking");
+                        var paddingProp = atlasSo.FindProperty("m_Padding");
+                        if (packingToken["allowRotation"] != null && enableRotationProp != null)
+                            enableRotationProp.boolValue = packingToken["allowRotation"].Value<bool>();
+                        if (packingToken["tightPacking"] != null && enableTightPackingProp != null)
+                            enableTightPackingProp.boolValue = packingToken["tightPacking"].Value<bool>();
+                        if (packingToken["padding"] != null && paddingProp != null)
+                            paddingProp.intValue = packingToken["padding"].Value<int>();
+                        atlasSo.ApplyModifiedProperties();
+                    }
+                }
+#elif UNITY_2022_2_OR_NEWER
                 var packingToken = p.GetRaw("packingSettings") as JObject;
                 if (packingToken != null)
                 {
@@ -496,7 +518,11 @@ namespace MCPForUnity.Editor.Tools
                             string spritePath = AssetDatabase.GUIDToAssetPath(guid);
                             var spriteObj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(spritePath);
                             if (spriteObj != null)
+#if UNITY_6000_0_OR_NEWER
+                                AssetDatabase.AddObjectToAsset(spriteObj, atlas);
+#else
                                 atlas.Add(new[] { spriteObj });
+#endif
                         }
                     }
                 }
@@ -504,7 +530,30 @@ namespace MCPForUnity.Editor.Tools
                 EditorUtility.SetDirty(atlas);
                 AssetDatabase.SaveAssets();
 
-#if UNITY_2022_2_OR_NEWER
+#if UNITY_6000_0_OR_NEWER
+                bool allowRotation, tightPacking;
+                int padding;
+                using (var atlasSo = new SerializedObject(atlas))
+                {
+                    allowRotation = atlasSo.FindProperty("m_EnableRotation")?.boolValue ?? false;
+                    tightPacking = atlasSo.FindProperty("m_EnableTightPacking")?.boolValue ?? false;
+                    padding = atlasSo.FindProperty("m_Padding")?.intValue ?? 4;
+                }
+                return new SuccessResponse(
+                    isNew ? $"SpriteAtlas '{atlasName}' created at '{outputPath}'." :
+                            $"SpriteAtlas '{atlasName}' configured at '{outputPath}'.",
+                    new
+                    {
+                        path = outputPath,
+                        isNew,
+                        packingSettings = new
+                        {
+                            allowRotation,
+                            tightPacking,
+                            padding
+                        }
+                    });
+#elif UNITY_2022_2_OR_NEWER
                 return new SuccessResponse(
                     isNew ? $"SpriteAtlas '{atlasName}' created at '{outputPath}'." :
                             $"SpriteAtlas '{atlasName}' configured at '{outputPath}'.",
@@ -800,18 +849,15 @@ namespace MCPForUnity.Editor.Tools
                 }
 
                 // Configure occlusion culling settings
-                bool occlusionSettingsChanged = false;
 
                 if (smallestOccluder.HasValue)
                 {
                     StaticOcclusionCulling.smallestOccluder = smallestOccluder.Value;
-                    occlusionSettingsChanged = true;
                 }
 
                 if (smallestHole.HasValue)
                 {
                     StaticOcclusionCulling.smallestHole = smallestHole.Value;
-                    occlusionSettingsChanged = true;
                 }
 
                 return new SuccessResponse(

@@ -72,7 +72,7 @@ namespace MCPForUnity.Editor.Tools.Profiler
                     // Profiler Recorder (Unity 2020.2+)
                     case "get_draw_calls":
                     {
-                        int frameIndex = p.GetInt("frameIndex", -1);
+                        int frameIndex = p.GetInt("frameIndex", -1) ?? -1;
 
                         var recorder = ProfilerRecorder.StartNew(
                             ProfilerCategory.Render, "Draw Calls Count");

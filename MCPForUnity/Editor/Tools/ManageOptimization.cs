@@ -109,29 +109,29 @@ namespace MCPForUnity.Editor.Tools
                 {
                     case "low":
                         shadowResolution = 512;
-                        textureQuality = (int)QualitySettings.MasterTextureLimit; // half res
-                        QualitySettings.masterTextureLimit = 1;
+                        textureQuality = QualitySettings.globalTextureMipmapLimit; // half res
+                        QualitySettings.globalTextureMipmapLimit = 1;
                         lodBias = 0.5f;
                         antiAliasing = 0;
                         break;
 
                     case "medium":
                         shadowResolution = 1024;
-                        QualitySettings.masterTextureLimit = 0; // full res
+                        QualitySettings.globalTextureMipmapLimit = 0; // full res
                         lodBias = 1.0f;
                         antiAliasing = 2;
                         break;
 
                     case "high":
                         shadowResolution = 2048;
-                        QualitySettings.masterTextureLimit = 0;
+                        QualitySettings.globalTextureMipmapLimit = 0;
                         lodBias = 2.0f;
                         antiAliasing = 4;
                         break;
 
                     case "ultra":
                         shadowResolution = 4096;
-                        QualitySettings.masterTextureLimit = 0;
+                        QualitySettings.globalTextureMipmapLimit = 0;
                         lodBias = 4.0f;
                         antiAliasing = 8;
                         break;
@@ -142,7 +142,7 @@ namespace MCPForUnity.Editor.Tools
                 }
 
                 // Apply individual quality settings
-                QualitySettings.shadowResolution = shadowResolution;
+                QualitySettings.shadowResolution = (UnityEngine.ShadowResolution)shadowResolution;
                 QualitySettings.lodBias = lodBias;
                 QualitySettings.antiAliasing = antiAliasing;
                 QualitySettings.shadowCascades = preset.ToLowerInvariant() switch
@@ -167,12 +167,16 @@ namespace MCPForUnity.Editor.Tools
 
                     if (levelIndex >= 0)
                     {
+#if !UNITY_2022_2_OR_NEWER
                         int[] levels = QualitySettings.GetQualityLevelsForPlatform(targetGroup);
                         if (levels != null && levels.Length > 0)
                         {
+#endif
                             int clampedIndex = Mathf.Min(levelIndex, QualitySettings.names.Length - 1);
                             QualitySettings.SetQualityLevel(clampedIndex, applyExpensiveChanges: true);
+#if !UNITY_2022_2_OR_NEWER
                         }
+#endif
                     }
                 }
 
@@ -183,7 +187,7 @@ namespace MCPForUnity.Editor.Tools
                         preset,
                         platform = string.IsNullOrEmpty(platform) ? null : platform,
                         shadowResolution,
-                        masterTextureLimit = QualitySettings.masterTextureLimit,
+                        masterTextureLimit = QualitySettings.globalTextureMipmapLimit,
                         lodBias,
                         antiAliasing,
                         shadowCascades = QualitySettings.shadowCascades
@@ -224,9 +228,11 @@ namespace MCPForUnity.Editor.Tools
                         string formatLower = format.ToLowerInvariant();
                         EditorUserBuildSettings.androidBuildSubtarget = formatLower switch
                         {
-                            "etc" or "etc1" or "etc2" => MobileTextureSubtarget.ETC,
+                            "etc" or "etc1" => MobileTextureSubtarget.ETC,
                             "astc" => MobileTextureSubtarget.ASTC,
+#if !UNITY_2022_1_OR_NEWER
                             "pvrtc" => MobileTextureSubtarget.PVRTC,
+#endif
                             "etc2" => MobileTextureSubtarget.ETC2,
                             _ => MobileTextureSubtarget.Generic
                         };
@@ -237,6 +243,7 @@ namespace MCPForUnity.Editor.Tools
                     if (!string.IsNullOrEmpty(format))
                     {
                         string formatLower = format.ToLowerInvariant();
+#if !UNITY_2023_1_OR_NEWER
                         EditorUserBuildSettings.iosBuildSubtarget = formatLower switch
                         {
                             "pvrtc" => MobileTextureSubtarget.PVRTC,
@@ -244,6 +251,10 @@ namespace MCPForUnity.Editor.Tools
                             "etc" or "etc2" => MobileTextureSubtarget.ETC2,
                             _ => MobileTextureSubtarget.Generic
                         };
+#else
+                        // iosBuildSubtarget removed in Unity 2023.1+
+                        // Per-texture platform overrides are applied below via TextureImporter
+#endif
                     }
                 }
 
@@ -443,6 +454,18 @@ namespace MCPForUnity.Editor.Tools
                 }
 
                 // Apply packing settings
+#if UNITY_2022_2_OR_NEWER
+                var packingToken = p.GetRaw("packingSettings") as JObject;
+                if (packingToken != null)
+                {
+                    if (packingToken["allowRotation"] != null)
+                        atlas.enableRotation = packingToken["allowRotation"].Value<bool>();
+                    if (packingToken["tightPacking"] != null)
+                        atlas.enableTightPacking = packingToken["tightPacking"].Value<bool>();
+                    if (packingToken["padding"] != null)
+                        atlas.padding = packingToken["padding"].Value<int>();
+                }
+#else
                 var packingParams = atlas.GetPackingSettings();
                 var packingToken = p.GetRaw("packingSettings") as JObject;
                 if (packingToken != null)
@@ -455,6 +478,7 @@ namespace MCPForUnity.Editor.Tools
                         packingParams.padding = packingToken["padding"].Value<int>();
                     atlas.SetPackingSettings(packingParams);
                 }
+#endif
 
                 // Add sprites/textures from include paths
                 string[] includePaths = p.GetStringArray("includePaths");
@@ -480,6 +504,22 @@ namespace MCPForUnity.Editor.Tools
                 EditorUtility.SetDirty(atlas);
                 AssetDatabase.SaveAssets();
 
+#if UNITY_2022_2_OR_NEWER
+                return new SuccessResponse(
+                    isNew ? $"SpriteAtlas '{atlasName}' created at '{outputPath}'." :
+                            $"SpriteAtlas '{atlasName}' configured at '{outputPath}'.",
+                    new
+                    {
+                        path = outputPath,
+                        isNew,
+                        packingSettings = new
+                        {
+                            allowRotation = atlas.enableRotation,
+                            tightPacking = atlas.enableTightPacking,
+                            padding = atlas.padding
+                        }
+                    });
+#else
                 var appliedPacking = atlas.GetPackingSettings();
 
                 return new SuccessResponse(
@@ -496,6 +536,7 @@ namespace MCPForUnity.Editor.Tools
                             padding = appliedPacking.padding
                         }
                     });
+#endif
             }
             catch (Exception ex)
             {

@@ -48,10 +48,11 @@ namespace MCPForUnity.Editor.Tools
                     case "cancel": return HandleCancel(p);
                     case "configure_code_generation":
                     {
-                        string platform = p.GetRequired("platform");
-                        var target = BuildTargetMapping.GetBuildTarget(platform);
-                        string backend = p.GetRequired("scriptingBackend");
-                        string stripping = p.GetRequired("strippingLevel");
+                        string platform = p.GetRequired("platform").Value;
+                        if (!BuildTargetMapping.TryResolveBuildTarget(platform, out var target))
+                            return new ErrorResponse(BuildTargetMapping.GetUnknownBuildTargetMessage(platform));
+                        string backend = p.GetRequired("scriptingBackend").Value;
+                        string stripping = p.GetRequired("strippingLevel").Value;
                         string compilerConfig = p.Get("compilerConfig", "Release");
                         string[] preserve = p.GetStringArray("preserveAssemblies");
 
@@ -71,6 +72,17 @@ namespace MCPForUnity.Editor.Tools
                                 _ => Il2CppCompilerConfiguration.Release
                             });
 
+#if UNITY_6000_0_OR_NEWER
+                        PlayerSettings.SetManagedStrippingLevel(namedTarget,
+                            stripping switch
+                            {
+                                "Disabled" => ManagedStrippingLevel.Disabled,
+                                "Low" => ManagedStrippingLevel.Low,
+                                "Medium" => ManagedStrippingLevel.Medium,
+                                "High" => ManagedStrippingLevel.High,
+                                _ => ManagedStrippingLevel.Low
+                            });
+#else
                         PlayerSettings.strippingLevel = stripping switch
                         {
                             "Disabled" => StrippingLevel.Disabled,
@@ -79,6 +91,7 @@ namespace MCPForUnity.Editor.Tools
                             "High" => StrippingLevel.UseMicroMSCorlib,
                             _ => StrippingLevel.StripAssemblies
                         };
+#endif
 
                         if (preserve != null && preserve.Length > 0)
                         {
@@ -99,7 +112,7 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "configure_aab":
                     {
-                        int versionCode = p.GetInt("bundleVersionCode");
+                        int versionCode = p.GetInt("bundleVersionCode") ?? 0;
                         string keystorePath = p.Get("keystorePath");
                         string keyAlias = p.Get("keyAlias");
 
@@ -122,14 +135,35 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "get_build_report":
                     {
+#if UNITY_2023_1_OR_NEWER
+                        // BuildReport.GetReport(path) removed in Unity 2023.1
+                        var report = BuildReport.GetLatestReport();
+#else
                         string buildPath = p.Get("buildPath");
                         var report = string.IsNullOrEmpty(buildPath)
                             ? BuildReport.GetLatestReport()
                             : BuildReport.GetReport(buildPath);
+#endif
 
                         if (report == null)
                             return new ErrorResponse("NO_BUILD_REPORT",
                                 "No build report found. Run manage_build(action='build') first.");
+
+#if UNITY_2023_1_OR_NEWER
+                        var buildFiles = report.GetFiles()?.Select(f => new
+                        {
+                            path = f.path,
+                            size = f.size,
+                            role = f.role
+                        }).ToList();
+#else
+                        var buildFiles = report.files?.Select(f => new
+                        {
+                            path = f.path,
+                            size = f.size,
+                            role = f.role
+                        }).ToList();
+#endif
 
                         return new SuccessResponse("Build report", new
                         {
@@ -138,12 +172,7 @@ namespace MCPForUnity.Editor.Tools
                             buildStarted = report.summary.buildStartedAt,
                             buildEnded = report.summary.buildEndedAt,
                             platform = report.summary.platform.ToString(),
-                            files = report.files?.Select(f => new
-                            {
-                                path = f.path,
-                                size = f.size,
-                                role = f.role
-                            }).ToList()
+                            files = buildFiles
                         });
                     }
                     default:

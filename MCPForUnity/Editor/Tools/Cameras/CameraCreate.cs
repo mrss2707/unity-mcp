@@ -271,7 +271,7 @@ namespace MCPForUnity.Editor.Tools.Cameras
             var smoothPath = pathGO.AddComponent(smoothPathType);
 
             // Set waypoints via reflection
-            var waypointsProp = smoothPathType.GetProperty("m_Waypoints")
+            var waypointsProp = (MemberInfo)smoothPathType.GetProperty("m_Waypoints")
                              ?? smoothPathType.GetField("m_Waypoints");
             if (waypointsProp != null)
             {
@@ -316,13 +316,15 @@ namespace MCPForUnity.Editor.Tools.Cameras
             var cart = cartGO.AddComponent(dollyCartType);
 
             // Set path and speed via reflection
-            var pathField = dollyCartType.GetProperty("m_Path")
-                        ?? dollyCartType.GetField("m_Path");
-            pathField?.SetValue(cart, smoothPath);
+            var pathMember = (MemberInfo)dollyCartType.GetProperty("m_Path")
+                          ?? dollyCartType.GetField("m_Path");
+            if (pathMember is PropertyInfo pPathPi) pPathPi.SetValue(cart, smoothPath);
+            else if (pathMember is FieldInfo pPathFi) pPathFi.SetValue(cart, smoothPath);
 
-            var speedField = dollyCartType.GetProperty("m_Speed")
-                         ?? dollyCartType.GetField("m_Speed");
-            speedField?.SetValue(cart, 1f);
+            var speedMember = (MemberInfo)dollyCartType.GetProperty("m_Speed")
+                           ?? dollyCartType.GetField("m_Speed");
+            if (speedMember is PropertyInfo sPi) sPi.SetValue(cart, 1f);
+            else if (speedMember is FieldInfo sFi) sFi.SetValue(cart, 1f);
 
             // Create virtual camera on cart
             var vcamGO = new GameObject("DollyVCam");
@@ -371,9 +373,10 @@ namespace MCPForUnity.Editor.Tools.Cameras
                     $"No Animator found at: {animatorPath}");
 
             // Set m_AnimatedTarget via reflection
-            var animTargetField = sdcType.GetProperty("m_AnimatedTarget")
-                              ?? sdcType.GetField("m_AnimatedTarget");
-            animTargetField?.SetValue(sdc, animator);
+            var animTargetMember = (MemberInfo)sdcType.GetProperty("m_AnimatedTarget")
+                                ?? sdcType.GetField("m_AnimatedTarget");
+            if (animTargetMember is PropertyInfo aPi) aPi.SetValue(sdc, animator);
+            else if (animTargetMember is FieldInfo aFi) aFi.SetValue(sdc, animator);
 
             if (!string.IsNullOrEmpty(defaultCam))
             {
@@ -504,9 +507,10 @@ namespace MCPForUnity.Editor.Tools.Cameras
                             new object[] { volumeProfilePath, volumeProfileType });
                         if (profile != null)
                         {
-                            var profileField = volumeSettingsType.GetField("m_Profile")
-                                            ?? volumeSettingsType.GetProperty("m_Profile");
-                            profileField?.SetValue(volumeSettings, profile);
+                            var profileMember = (MemberInfo)volumeSettingsType.GetField("m_Profile")
+                                             ?? volumeSettingsType.GetProperty("m_Profile");
+                            if (profileMember is PropertyInfo prPi) prPi.SetValue(volumeSettings, profile);
+                            else if (profileMember is FieldInfo prFi) prFi.SetValue(volumeSettings, profile);
                         }
                     }
                 }

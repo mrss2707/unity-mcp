@@ -35,7 +35,7 @@ namespace MCPForUnity.Editor.Tools
             {
                 case "find_references":
                 {
-                    string symbolName = p.GetRequired("symbolName");
+                    string symbolName = p.GetRequired("symbolName").Value;
                     string scope = p.Get("scope", "Assets");
 
                     var scripts = AssetDatabase.FindAssets("t:MonoScript",

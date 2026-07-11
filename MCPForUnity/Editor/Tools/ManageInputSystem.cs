@@ -734,7 +734,7 @@ namespace MCPForUnity.Editor.Tools
                     var schemesArray = ExtractArrayFromReadOnlyArray(schemesObj);
 
                     object schemeToRemove = null;
-                    var nameField = _controlSchemeType.GetProperty("name") ?? _controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
+                    var nameField = _controlSchemeType.GetProperty("name") ?? (MemberInfo)_controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
 
                     if (schemesArray != null)
                     {
@@ -1547,10 +1547,8 @@ namespace MCPForUnity.Editor.Tools
                 if (schemesArray == null)
                     return result;
 
-                var nameMember = (MemberInfo)(_controlSchemeType.GetProperty("name") ??
-                                              _controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance));
-                var bindingGroupMember = (MemberInfo)(_controlSchemeType.GetProperty("bindingGroup") ??
-                                                      _controlSchemeType.GetField("bindingGroup", BindingFlags.Public | BindingFlags.Instance));
+                var nameMember = _controlSchemeType.GetProperty("name") ?? (MemberInfo)_controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
+                var bindingGroupMember = _controlSchemeType.GetProperty("bindingGroup") ?? (MemberInfo)_controlSchemeType.GetField("bindingGroup", BindingFlags.Public | BindingFlags.Instance);
 
                 for (int i = 0; i < schemesArray.Length; i++)
                 {

@@ -106,8 +106,8 @@ namespace MCPForUnity.Editor.Tools.GameObjects
 
                     case "set_sibling_index":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
-                        int index = p.GetInt("index");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        int index = p.GetInt("index") ?? 0;
                         int maxIndex = go.transform.parent != null
                             ? go.transform.parent.childCount - 1 : 0;
                         go.transform.SetSiblingIndex(Mathf.Clamp(index, 0, maxIndex));
@@ -119,7 +119,7 @@ namespace MCPForUnity.Editor.Tools.GameObjects
 
                     case "get_detailed_info":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
                         bool includeInactive = p.GetBool("includeInactive");
                         string[] componentFilter = p.GetStringArray("componentFilter");
 
@@ -131,7 +131,7 @@ namespace MCPForUnity.Editor.Tools.GameObjects
                                 .Where(n => componentFilter.Any(f =>
                                     n.Contains(f, StringComparison.OrdinalIgnoreCase)));
 
-                        int maxChildren = p.GetInt("maxChildren", 50);
+                        int maxChildren = p.GetInt("maxChildren", 50) ?? 50;
                         var children = go.GetComponentsInChildren<Transform>(includeInactive)
                             .Skip(1).Take(maxChildren)
                             .Select(t => t.name).ToList();

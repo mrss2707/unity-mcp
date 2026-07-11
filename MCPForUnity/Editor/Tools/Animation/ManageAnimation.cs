@@ -260,7 +260,7 @@ namespace MCPForUnity.Editor.Tools.Animation
         private static object HandleListModelClips(JObject @params)
         {
             var p = new ToolParams(@params);
-            string modelPath = p.GetRequired("modelPath");
+            string modelPath = p.GetRequired("modelPath").Value;
             var importer = AssetImporter.GetAtPath(modelPath);
             if (importer == null)
                 return new ErrorResponse("ASSET_NOT_FOUND",

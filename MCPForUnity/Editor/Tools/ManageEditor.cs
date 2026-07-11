@@ -362,7 +362,7 @@ namespace MCPForUnity.Editor.Tools
                                 totalSize = report.summary.totalSize,
                                 result = report.summary.result.ToString(),
                                 platform = report.summary.platform.ToString(),
-                                files = report.files?.Select(f => new
+                                files = report.GetFiles()?.Select(f => new
                                 {
                                     path = f.path,
                                     size = f.size

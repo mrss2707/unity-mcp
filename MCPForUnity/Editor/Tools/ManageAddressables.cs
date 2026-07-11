@@ -324,9 +324,9 @@ namespace MCPForUnity.Editor.Tools
                 var entries = GetEntriesList(group);
                 if (entries != null)
                 {
-                    foreach (var entry in entries)
+                    foreach (var existingEntry in entries)
                     {
-                        if (GetEntryGuid(entry) == guid)
+                        if (GetEntryGuid(existingEntry) == guid)
                             return new ErrorResponse("ENTRY_EXISTS",
                                 $"Asset '{assetPath}' is already assigned to group '{groupName}'.");
                     }

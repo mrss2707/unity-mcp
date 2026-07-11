@@ -63,9 +63,9 @@ namespace MCPForUnity.Editor.Tools
                         return SetProperty(@params, targetToken, searchMethod);
                     case "get_property":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
-                        string componentType = p.GetRequired("componentType");
-                        string propertyName = p.GetRequired("propertyName");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        string componentType = p.GetRequired("componentType").Value;
+                        string propertyName = p.GetRequired("propertyName").Value;
 
                         var component = go.GetComponent(componentType);
                         if (component == null)
@@ -84,7 +84,7 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "list_all":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
                         bool includeInactive = p.GetBool("includeInactive");
                         var components = go.GetComponents<Component>()
                             .Where(c => c != null)
@@ -97,11 +97,11 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "add_simple_listener":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
-                        string componentType = p.GetRequired("componentType");
-                        string eventName = p.GetRequired("eventName");
-                        var targetObj = FindGameObject(p.GetRequired("targetPath"));
-                        string methodName = p.GetRequired("methodName");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        string componentType = p.GetRequired("componentType").Value;
+                        string eventName = p.GetRequired("eventName").Value;
+                        var targetObj = FindGameObject(p.GetRequired("targetPath").Value);
+                        string methodName = p.GetRequired("methodName").Value;
 
                         var component = go.GetComponent(componentType);
                         var so = new SerializedObject(component);
@@ -110,23 +110,35 @@ namespace MCPForUnity.Editor.Tools
                             return new ErrorResponse("EVENT_NOT_FOUND",
                                 $"Event '{eventName}' not found on {componentType}.");
 
-                        int count = UnityEventTools.GetPersistentEventCount(eventProp);
+                        int count;
+#if UNITY_2022_2_OR_NEWER
+                        var calls = eventProp.FindPropertyRelative("m_PersistentCalls.m_Calls");
+                        count = calls.arraySize;
+                        calls.InsertArrayElementAtIndex(count);
+                        var newCall = calls.GetArrayElementAtIndex(count);
+                        newCall.FindPropertyRelative("m_Target").objectReferenceValue = targetObj;
+                        newCall.FindPropertyRelative("m_MethodName").stringValue = methodName;
+                        newCall.FindPropertyRelative("m_Mode").intValue = 1; // EventDefined
+                        newCall.FindPropertyRelative("m_Arguments").FindPropertyRelative("m_ObjectArgumentAssemblyTypeName").stringValue = "";
+#else
+                        count = UnityEventTools.GetPersistentEventCount(eventProp);
                         UnityEventTools.AddPersistentListener(eventProp);
                         UnityEventTools.RegisterPersistentListener(eventProp, count,
                             targetObj, methodName);
+#endif
                         so.ApplyModifiedProperties();
                         return new SuccessResponse(
                             $"Added persistent listener #{count}: {methodName} on {targetObj.name}");
                     }
                     case "add_param_listener":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
-                        string componentType = p.GetRequired("componentType");
-                        string eventName = p.GetRequired("eventName");
-                        var targetObj = FindGameObject(p.GetRequired("targetPath"));
-                        string methodName = p.GetRequired("methodName");
-                        string paramType = p.GetRequired("paramType");
-                        string paramValue = p.GetRequired("paramValue");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        string componentType = p.GetRequired("componentType").Value;
+                        string eventName = p.GetRequired("eventName").Value;
+                        var targetObj = FindGameObject(p.GetRequired("targetPath").Value);
+                        string methodName = p.GetRequired("methodName").Value;
+                        string paramType = p.GetRequired("paramType").Value;
+                        string paramValue = p.GetRequired("paramValue").Value;
 
                         var component = go.GetComponent(componentType);
                         var so = new SerializedObject(component);
@@ -135,11 +147,47 @@ namespace MCPForUnity.Editor.Tools
                             return new ErrorResponse("EVENT_NOT_FOUND",
                                 $"Event '{eventName}' not found on {componentType}.");
 
-                        int count = UnityEventTools.GetPersistentEventCount(eventProp);
+                        int pCount;
+#if UNITY_2022_2_OR_NEWER
+                        var pCalls = eventProp.FindPropertyRelative("m_PersistentCalls.m_Calls");
+                        pCount = pCalls.arraySize;
+                        pCalls.InsertArrayElementAtIndex(pCount);
+                        var pCall = pCalls.GetArrayElementAtIndex(pCount);
+                        pCall.FindPropertyRelative("m_Target").objectReferenceValue = targetObj;
+                        pCall.FindPropertyRelative("m_MethodName").stringValue = methodName;
+                        pCall.FindPropertyRelative("m_Mode").intValue = 1;
+                        var args = pCall.FindPropertyRelative("m_Arguments");
+                        switch (paramType)
+                        {
+                            case "int":
+                                args.FindPropertyRelative("m_IntArgument").intValue = int.Parse(paramValue);
+                                args.FindPropertyRelative("m_ObjectArgumentAssemblyTypeName").stringValue = "System.Int32, mscorlib";
+                                break;
+                            case "float":
+                                args.FindPropertyRelative("m_FloatArgument").floatValue = float.Parse(paramValue);
+                                args.FindPropertyRelative("m_ObjectArgumentAssemblyTypeName").stringValue = "System.Single, mscorlib";
+                                break;
+                            case "string":
+                                args.FindPropertyRelative("m_StringArgument").stringValue = paramValue;
+                                args.FindPropertyRelative("m_ObjectArgumentAssemblyTypeName").stringValue = "System.String, mscorlib";
+                                break;
+                            case "bool":
+                                args.FindPropertyRelative("m_BoolArgument").boolValue = bool.Parse(paramValue);
+                                args.FindPropertyRelative("m_ObjectArgumentAssemblyTypeName").stringValue = "System.Boolean, mscorlib";
+                                break;
+                            case "Object":
+                                args.FindPropertyRelative("m_ObjectArgument").objectReferenceValue = targetObj;
+                                args.FindPropertyRelative("m_ObjectArgumentAssemblyTypeName").stringValue = "UnityEngine.Object, UnityEngine";
+                                break;
+                            default:
+                                throw new ArgumentException($"Unknown paramType: {paramType}");
+                        }
+#else
+                        pCount = UnityEventTools.GetPersistentEventCount(eventProp);
                         UnityEventTools.AddPersistentListener(eventProp);
-                        UnityEventTools.RegisterPersistentListener(eventProp, count,
+                        UnityEventTools.RegisterPersistentListener(eventProp, pCount,
                             targetObj, methodName);
-                        UnityEventTools.RegisterPersistentListenerArgument(eventProp, count,
+                        UnityEventTools.RegisterPersistentListenerArgument(eventProp, pCount,
                             paramType switch
                             {
                                 "int" => int.Parse(paramValue),
@@ -149,16 +197,17 @@ namespace MCPForUnity.Editor.Tools
                                 "Object" => targetObj,
                                 _ => throw new ArgumentException($"Unknown paramType: {paramType}")
                             });
+#endif
                         so.ApplyModifiedProperties();
                         return new SuccessResponse(
-                            $"Added persistent typed listener #{count}: {methodName}({paramType})");
+                            $"Added persistent typed listener #{pCount}: {methodName}({paramType})");
                     }
                     case "remove_listener":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
-                        string componentType = p.GetRequired("componentType");
-                        string eventName = p.GetRequired("eventName");
-                        int listenerIndex = p.GetInt("listenerIndex");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        string componentType = p.GetRequired("componentType").Value;
+                        string eventName = p.GetRequired("eventName").Value;
+                        int listenerIndex = p.GetInt("listenerIndex") ?? 0;
 
                         var component = go.GetComponent(componentType);
                         var so = new SerializedObject(component);
@@ -167,16 +216,21 @@ namespace MCPForUnity.Editor.Tools
                             return new ErrorResponse("EVENT_NOT_FOUND",
                                 $"Event '{eventName}' not found on {componentType}.");
 
+#if UNITY_2022_2_OR_NEWER
+                        var rCalls = eventProp.FindPropertyRelative("m_PersistentCalls.m_Calls");
+                        rCalls.DeleteArrayElementAtIndex(listenerIndex);
+#else
                         UnityEventTools.RemovePersistentListener(eventProp, listenerIndex);
+#endif
                         so.ApplyModifiedProperties();
                         return new SuccessResponse(
                             $"Removed persistent listener at index {listenerIndex}");
                     }
                     case "get_listeners":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
-                        string componentType = p.GetRequired("componentType");
-                        string eventName = p.GetRequired("eventName");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        string componentType = p.GetRequired("componentType").Value;
+                        string eventName = p.GetRequired("eventName").Value;
 
                         var component = go.GetComponent(componentType);
                         var so = new SerializedObject(component);
@@ -185,16 +239,29 @@ namespace MCPForUnity.Editor.Tools
                             return new ErrorResponse("EVENT_NOT_FOUND",
                                 $"Event '{eventName}' not found on {componentType}.");
 
-                        int count = UnityEventTools.GetPersistentEventCount(eventProp);
+                        int gCount;
                         var listeners = new List<object>();
-                        for (int i = 0; i < count; i++)
+#if UNITY_2022_2_OR_NEWER
+                        var gCalls = eventProp.FindPropertyRelative("m_PersistentCalls.m_Calls");
+                        gCount = gCalls.arraySize;
+                        for (int i = 0; i < gCount; i++)
+                        {
+                            var call = gCalls.GetArrayElementAtIndex(i);
+                            var target = call.FindPropertyRelative("m_Target").objectReferenceValue;
+                            var method = call.FindPropertyRelative("m_MethodName").stringValue;
+                            listeners.Add(new { index = i, target = target?.name, method });
+                        }
+#else
+                        gCount = UnityEventTools.GetPersistentEventCount(eventProp);
+                        for (int i = 0; i < gCount; i++)
                         {
                             var target = UnityEventTools.GetPersistentTarget(eventProp, i);
                             var method = UnityEventTools.GetPersistentMethodName(eventProp, i);
                             listeners.Add(new { index = i, target = target?.name, method });
                         }
-                        return new SuccessResponse($"Found {count} listeners",
-                            new { count, listeners });
+#endif
+                        return new SuccessResponse($"Found {gCount} listeners",
+                            new { count = gCount, listeners });
                     }
                     default:
                         return new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property");

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
@@ -246,6 +247,284 @@ namespace MCPForUnity.Editor.Tools.Cameras
                     alreadyExisted = false
                 }
             };
+        }
+
+        internal static object CreateDolly(ToolParams p)
+        {
+            if (!CameraHelpers.HasCinemachine)
+                return new ErrorResponse(
+                    "Cinemachine package is not installed. " +
+                    "Install com.unity.cinemachine via Package Manager.");
+
+            string[] trackPoints = p.GetStringArray("trackPoints") ?? Array.Empty<string>();
+            string cartName = p.Get("cartName", "DollyCart");
+            string vcamPath = p.Get("vcamPath");
+
+            // Resolve Cinemachine types via reflection
+            var smoothPathType = CameraHelpers.ResolveComponentType("CinemachineSmoothPath");
+            var dollyCartType = CameraHelpers.ResolveComponentType("CinemachineDollyCart");
+            if (smoothPathType == null || dollyCartType == null)
+                return new ErrorResponse("Cinemachine dolly types not found.");
+
+            // Create CinemachineSmoothPath
+            var pathGO = new GameObject("DollyTrack");
+            var smoothPath = pathGO.AddComponent(smoothPathType);
+
+            // Set waypoints via reflection
+            var waypointsProp = smoothPathType.GetProperty("m_Waypoints")
+                             ?? smoothPathType.GetField("m_Waypoints");
+            if (waypointsProp != null)
+            {
+                var waypoints = GetWaypointsArray(waypointsProp, smoothPath);
+                if (waypoints != null)
+                {
+                    int count = Mathf.Min(trackPoints.Length, waypoints.Length);
+                    var wpType = waypoints.GetType().GetElementType();
+                    var positionField = wpType?.GetField("position");
+                    var rollField = wpType?.GetField("roll");
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        string[] parts = trackPoints[i].Split(',');
+                        if (parts.Length >= 3 &&
+                            float.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out float x) &&
+                            float.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out float y) &&
+                            float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out float z))
+                        {
+                            var pos = new Vector3(x, y, z);
+                            var wp = waypoints.GetValue(i);
+                            positionField?.SetValue(wp, pos);
+
+                            if (parts.Length >= 4 && rollField != null &&
+                                float.TryParse(parts[3], System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out float roll))
+                            {
+                                rollField.SetValue(wp, roll);
+                            }
+
+                            waypoints.SetValue(wp, i);
+                        }
+                    }
+                }
+            }
+
+            // Create dolly cart
+            var cartGO = new GameObject(cartName);
+            var cart = cartGO.AddComponent(dollyCartType);
+
+            // Set path and speed via reflection
+            var pathField = dollyCartType.GetProperty("m_Path")
+                        ?? dollyCartType.GetField("m_Path");
+            pathField?.SetValue(cart, smoothPath);
+
+            var speedField = dollyCartType.GetProperty("m_Speed")
+                         ?? dollyCartType.GetField("m_Speed");
+            speedField?.SetValue(cart, 1f);
+
+            // Create virtual camera on cart
+            var vcamGO = new GameObject("DollyVCam");
+            var vcamType = CameraHelpers.CinemachineCameraType;
+            var vcam = vcamGO.AddComponent(vcamType);
+            vcamGO.transform.SetParent(cartGO.transform);
+
+            if (!string.IsNullOrEmpty(vcamPath))
+            {
+                var followTarget = CameraHelpers.ResolveGameObjectRef(vcamPath);
+                if (followTarget != null)
+                    CameraHelpers.SetReflectionProperty(vcam, "Follow", followTarget.transform);
+            }
+
+            CameraHelpers.MarkDirty(pathGO);
+            CameraHelpers.MarkDirty(cartGO);
+
+            return new SuccessResponse(
+                $"Created dolly track with {trackPoints.Length} waypoints",
+                new { trackName = "DollyTrack", cartName, waypointsCount = trackPoints.Length });
+        }
+
+        internal static object CreateStateDriven(ToolParams p)
+        {
+            if (!CameraHelpers.HasCinemachine)
+                return new ErrorResponse(
+                    "Cinemachine package is not installed. " +
+                    "Install com.unity.cinemachine via Package Manager.");
+
+            string parentName = p.Get("parentName", "StateDrivenCamera");
+            string animatorPath = p.Get("animatorPath");
+            if (string.IsNullOrEmpty(animatorPath))
+                return new ErrorResponse("'animatorPath' parameter is required.");
+            string defaultCam = p.Get("defaultCam");
+
+            var sdcType = CameraHelpers.ResolveComponentType("CinemachineStateDrivenCamera");
+            if (sdcType == null)
+                return new ErrorResponse("CinemachineStateDrivenCamera type not found.");
+
+            var go = new GameObject(parentName);
+            var sdc = go.AddComponent(sdcType);
+
+            var animator = GameObject.Find(animatorPath)?.GetComponent<Animator>();
+            if (animator == null)
+                return new ErrorResponse("ANIMATOR_NOT_FOUND",
+                    $"No Animator found at: {animatorPath}");
+
+            // Set m_AnimatedTarget via reflection
+            var animTargetField = sdcType.GetProperty("m_AnimatedTarget")
+                              ?? sdcType.GetField("m_AnimatedTarget");
+            animTargetField?.SetValue(sdc, animator);
+
+            if (!string.IsNullOrEmpty(defaultCam))
+            {
+                var defaultCamGO = CameraHelpers.ResolveGameObjectRef(defaultCam);
+                var defaultVCam = defaultCamGO?.GetComponent(CameraHelpers.CinemachineCameraType);
+                if (defaultVCam != null)
+                {
+                    // Set m_ChildCameras via reflection
+                    var childCamerasField = sdcType.GetField("m_ChildCameras");
+                    if (childCamerasField != null)
+                    {
+                        var elementType = childCamerasField.FieldType.GetElementType();
+                        if (elementType != null)
+                        {
+                            var childArray = Array.CreateInstance(elementType, 1);
+                            childArray.SetValue(defaultVCam, 0);
+                            childCamerasField.SetValue(sdc, childArray);
+                        }
+                    }
+                }
+            }
+
+            CameraHelpers.MarkDirty(go);
+
+            return new SuccessResponse(
+                $"Created StateDrivenCamera '{parentName}'");
+        }
+
+        internal static object CreateClearshot(ToolParams p)
+        {
+            if (!CameraHelpers.HasCinemachine)
+                return new ErrorResponse(
+                    "Cinemachine package is not installed. " +
+                    "Install com.unity.cinemachine via Package Manager.");
+
+            string parentName = p.Get("parentName", "ClearShotCamera");
+            string[] childVcams = p.GetStringArray("childVcams");
+
+            var csType = CameraHelpers.ResolveComponentType("CinemachineClearShot");
+            if (csType == null)
+                return new ErrorResponse("CinemachineClearShot type not found.");
+
+            var go = new GameObject(parentName);
+            var cs = go.AddComponent(csType);
+
+            if (childVcams != null && childVcams.Length > 0)
+            {
+                // Resolve child vcams by name/path
+                var resolved = new List<object>();
+                foreach (var name in childVcams)
+                {
+                    var camGO = CameraHelpers.ResolveGameObjectRef(name);
+                    if (camGO != null)
+                    {
+                        var vcam = camGO.GetComponent(CameraHelpers.CinemachineCameraType);
+                        if (vcam != null)
+                            resolved.Add(vcam);
+                    }
+                }
+
+                // Set m_ChildCameras via reflection
+                var childCamerasField = csType.GetField("m_ChildCameras");
+                if (childCamerasField != null && resolved.Count > 0)
+                {
+                    var elementType = childCamerasField.FieldType.GetElementType();
+                    if (elementType != null)
+                    {
+                        var childArray = Array.CreateInstance(elementType, resolved.Count);
+                        for (int i = 0; i < resolved.Count; i++)
+                            childArray.SetValue(resolved[i], i);
+                        childCamerasField.SetValue(cs, childArray);
+                    }
+                }
+            }
+
+            CameraHelpers.MarkDirty(go);
+
+            return new SuccessResponse(
+                $"Created ClearShot camera '{parentName}' with {childVcams?.Length ?? 0} children");
+        }
+
+        internal static object SetCinemachineVolume(ToolParams p)
+        {
+            if (!CameraHelpers.HasCinemachine)
+                return new ErrorResponse(
+                    "Cinemachine package is not installed. " +
+                    "Install com.unity.cinemachine via Package Manager.");
+
+            var vcamPathResult = p.GetRequired("vcamPath");
+            if (!vcamPathResult.IsSuccess)
+                return new ErrorResponse(vcamPathResult.ErrorMessage);
+            string vcamPath = vcamPathResult.Value;
+
+            string volumeProfilePath = p.Get("volumeProfilePath");
+            int priority = p.GetInt("priority") ?? 0;
+
+            var vcamGO = CameraHelpers.ResolveGameObjectRef(vcamPath);
+            if (vcamGO == null)
+                return new ErrorResponse("VCAM_NOT_FOUND",
+                    $"GameObject not found: {vcamPath}");
+
+            var vcam = vcamGO.GetComponent(CameraHelpers.CinemachineCameraType);
+            if (vcam == null)
+                return new ErrorResponse("VCAM_NOT_FOUND",
+                    $"CinemachineCamera not found on: {vcamPath}");
+
+            // Resolve CinemachineVolumeSettings type
+            var volumeSettingsType = CameraHelpers.ResolveComponentType("CinemachineVolumeSettings");
+            if (volumeSettingsType == null)
+                return new ErrorResponse(
+                    "CinemachineVolumeSettings type not found. Ensure Cinemachine package is up to date.");
+
+            // Add or get CinemachineVolumeSettings extension
+            var volumeSettings = vcamGO.GetComponent(volumeSettingsType);
+            if (volumeSettings == null)
+                volumeSettings = vcamGO.AddComponent(volumeSettingsType);
+
+            if (!string.IsNullOrEmpty(volumeProfilePath))
+            {
+                var volumeProfileType = UnityTypeResolver.ResolveAny("VolumeProfile");
+                if (volumeProfileType != null)
+                {
+                    var loadMethod = typeof(AssetDatabase).GetMethod(
+                        "LoadAssetAtPath", new[] { typeof(string), typeof(Type) });
+                    if (loadMethod != null)
+                    {
+                        var profile = loadMethod.Invoke(null,
+                            new object[] { volumeProfilePath, volumeProfileType });
+                        if (profile != null)
+                        {
+                            var profileField = volumeSettingsType.GetField("m_Profile")
+                                            ?? volumeSettingsType.GetProperty("m_Profile");
+                            profileField?.SetValue(volumeSettings, profile);
+                        }
+                    }
+                }
+            }
+
+            CameraHelpers.MarkDirty(vcamGO);
+
+            return new SuccessResponse(
+                $"Set volume on '{vcamPath}' (priority={priority})");
+        }
+
+        private static Array GetWaypointsArray(MemberInfo propOrField, object target)
+        {
+            if (propOrField is PropertyInfo pi)
+                return pi.GetValue(target) as Array;
+            if (propOrField is FieldInfo fi)
+                return fi.GetValue(target) as Array;
+            return null;
         }
     }
 }

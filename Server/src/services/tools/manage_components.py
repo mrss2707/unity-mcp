@@ -16,7 +16,9 @@ from services.tools.preflight import preflight
 @mcp_for_unity_tool(
     description=(
         "Add, remove, or set properties on components attached to GameObjects. "
-        "Actions: add, remove, set_property. Requires target (instance ID or name) and component_type. "
+        "Actions: add, remove, set_property, get_property, list_all, add_simple_listener, add_param_listener, remove_listener, get_listeners. "
+        "Requires target (instance ID or name) and component_type for add/remove/set_property. "
+        "Use gameObjectPath for inspection/listener actions. "
         "For READING component data, use the mcpforunity://scene/gameobject/{id}/components resource "
         "or mcpforunity://scene/gameobject/{id}/component/{name} for a single component. "
         "For creating/deleting GameObjects themselves, use manage_gameobject instead."
@@ -25,17 +27,18 @@ from services.tools.preflight import preflight
 async def manage_components(
     ctx: Context,
     action: Annotated[
-        Literal["add", "remove", "set_property"],
-        "Action to perform: add (add component), remove (remove component), set_property (set component property)"
+        Literal["add", "remove", "set_property", "get_property", "list_all",
+                "add_simple_listener", "add_param_listener", "remove_listener", "get_listeners"],
+        "Action to perform: add, remove, set_property, get_property, list_all, add_simple_listener, add_param_listener, remove_listener, get_listeners"
     ],
     target: Annotated[
-        str | int,
-        "Target GameObject - instance ID (preferred) or name/path"
-    ],
+        str | int | None,
+        "Target GameObject - instance ID (preferred) or name/path. Required for add/remove/set_property."
+    ] = None,
     component_type: Annotated[
-        str,
-        "Component type name (e.g., 'Rigidbody', 'BoxCollider', 'MyScript')"
-    ],
+        str | None,
+        "Component type name (e.g., 'Rigidbody', 'BoxCollider', 'MyScript'). Required for add/remove/set_property/get_property."
+    ] = None,
     search_method: Annotated[
         Optional[Literal["by_id", "by_name", "by_path"]],
         "How to find the target GameObject"
@@ -60,6 +63,15 @@ async def manage_components(
         "Zero-based index to select which component when multiple of the same type exist. "
         "Use the components resource to discover indices. If omitted, targets the first instance."
     ] = None,
+    # --- Parameters for new inspection/listener actions ---
+    gameObjectPath: Annotated[Optional[str], "Path to the target GameObject (for inspection/listener actions)."] = None,
+    propertyName: Annotated[Optional[str], "Name of the property to get (for get_property action)."] = None,
+    eventName: Annotated[Optional[str], "Name of the UnityEvent field (for listener actions)."] = None,
+    targetPath: Annotated[Optional[str], "Path to the target GameObject for the listener callback."] = None,
+    methodName: Annotated[Optional[str], "Method name for the listener callback."] = None,
+    paramType: Annotated[Optional[Literal["int", "float", "string", "bool", "Object"]], "Parameter type for typed listener."] = None,
+    paramValue: Annotated[Optional[str], "Parameter value for typed listener (as string, will be parsed by C#)."] = None,
+    listenerIndex: Annotated[Optional[int], "Index of the persistent listener to remove."] = None,
 ) -> dict[str, Any]:
     """
     Manage components on GameObjects.
@@ -84,20 +96,21 @@ async def manage_components(
     if not action:
         return {
             "success": False,
-            "message": "Missing required parameter 'action'. Valid actions: add, remove, set_property"
+            "message": "Missing required parameter 'action'. Valid actions: add, remove, set_property, get_property, list_all, add_simple_listener, add_param_listener, remove_listener, get_listeners"
         }
 
-    if not target:
-        return {
-            "success": False,
-            "message": "Missing required parameter 'target'. Specify GameObject instance ID or name."
-        }
-
-    if not component_type:
-        return {
-            "success": False,
-            "message": "Missing required parameter 'component_type'. Specify the component type name."
-        }
+    legacy_actions = {"add", "remove", "set_property"}
+    if action in legacy_actions:
+        if not target:
+            return {
+                "success": False,
+                "message": "Missing required parameter 'target'. Specify GameObject instance ID or name."
+            }
+        if not component_type:
+            return {
+                "success": False,
+                "message": "Missing required parameter 'component_type'. Specify the component type name."
+            }
 
     # --- Normalize properties with detailed error handling ---
     properties, props_error = normalize_properties(properties)
@@ -113,6 +126,14 @@ async def manage_components(
             "action": action,
             "target": target,
             "componentType": component_type,
+            "gameObjectPath": gameObjectPath,
+            "propertyName": propertyName,
+            "eventName": eventName,
+            "targetPath": targetPath,
+            "methodName": methodName,
+            "paramType": paramType,
+            "paramValue": paramValue,
+            "listenerIndex": listenerIndex,
         }
 
         if search_method:

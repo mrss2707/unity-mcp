@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using MCPForUnity.Editor.Helpers;
 using MCPForUnity.Editor.Services;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using UnityEditor.Build.Reporting;
 using UnityEditorInternal; // Required for tag management
 using UnityEngine;
 
@@ -167,6 +171,237 @@ namespace MCPForUnity.Editor.Tools
                     {
                         current_group = string.IsNullOrEmpty(nextGroup) ? (string)null : nextGroup
                     });
+                }
+
+                case "create_folder_structure":
+                {
+                    string structure = p.Get("structure", "default");
+                    string rootPath = p.Get("rootPath", "Assets");
+
+                    // Validate path is within Assets/
+                    if (!rootPath.StartsWith("Assets/") && rootPath != "Assets")
+                        return new ErrorResponse("INVALID_PATH",
+                            "rootPath must be within Assets/");
+
+                    var folders = structure switch
+                    {
+                        "default" => new[]
+                        {
+                            "Scripts", "Prefabs", "Scenes", "Materials",
+                            "Textures", "Audio", "Animations", "Models"
+                        },
+                        "urp" => new[]
+                        {
+                            "Scripts", "Prefabs", "Scenes", "Materials",
+                            "Textures", "Audio", "Animations", "Models",
+                            "Settings/Renderer", "Settings/URP"
+                        },
+                        "hdrp" => new[]
+                        {
+                            "Scripts", "Prefabs", "Scenes", "Materials",
+                            "Textures", "Audio", "Animations", "Models",
+                            "Settings/HDRP", "Settings/Renderer", "Settings/Volumes"
+                        },
+                        "custom" => p.GetStringArray("folders")
+                            ?? new[] { "Scripts", "Prefabs", "Scenes" },
+                        _ => new[] { "Scripts", "Prefabs", "Scenes" }
+                    };
+
+                    var created = new List<string>();
+                    foreach (var folder in folders)
+                    {
+                        string fullPath = System.IO.Path.Combine(rootPath, folder)
+                            .Replace("\\", "/");
+                        if (!AssetDatabase.IsValidFolder(fullPath))
+                        {
+                            string parent = System.IO.Path.GetDirectoryName(fullPath)
+                                .Replace("\\", "/");
+                            string name = System.IO.Path.GetFileName(fullPath);
+                            string guid = AssetDatabase.CreateFolder(parent, name);
+                            created.Add(fullPath);
+                        }
+                    }
+                    AssetDatabase.Refresh();
+                    return new SuccessResponse(
+                        $"Created {created.Count} folders ({structure} structure)",
+                        new { created });
+                }
+
+                case "run_health_check":
+                {
+                    string[] checks = p.GetStringArray("checks");
+                    var results = new List<object>();
+
+                    foreach (var check in checks)
+                    {
+                        switch (check)
+                        {
+                            case "compile":
+                                results.Add(new
+                                {
+                                    check,
+                                    status = EditorApplication.isCompiling ? "fail" : "pass",
+                                    detail = EditorApplication.isCompiling
+                                        ? "Unity is currently compiling scripts"
+                                        : "No compilation in progress"
+                                });
+                                break;
+
+                            case "prefab":
+                                var brokenPrefabs = AssetDatabase.FindAssets("t:Prefab")
+                                    .Select(AssetDatabase.GUIDToAssetPath)
+                                    .Where(path =>
+                                    {
+                                        try
+                                        {
+                                            var content = PrefabUtility
+                                                .LoadPrefabContents(path);
+                                            PrefabUtility.UnloadPrefabContents(content);
+                                            return false;
+                                        }
+                                        catch { return true; }
+                                    })
+                                    .ToList();
+                                results.Add(new
+                                {
+                                    check,
+                                    status = brokenPrefabs.Count == 0 ? "pass" : "fail",
+                                    count = brokenPrefabs.Count,
+                                    detail = brokenPrefabs.Count > 0
+                                        ? brokenPrefabs : null
+                                });
+                                break;
+
+                            case "missing_ref":
+                                var allPrefabs = AssetDatabase.FindAssets("t:Prefab");
+                                var missingRefs = new List<string>();
+                                foreach (var guid in allPrefabs)
+                                {
+                                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                                    var go = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                                    if (go != null)
+                                    {
+                                        var comps = go.GetComponentsInChildren<Component>(true);
+                                        if (comps.Any(c => c == null))
+                                            missingRefs.Add(path);
+                                    }
+                                }
+                                results.Add(new
+                                {
+                                    check,
+                                    status = missingRefs.Count == 0 ? "pass" : "fail",
+                                    count = missingRefs.Count,
+                                    detail = missingRefs.Count > 0 ? missingRefs : null
+                                });
+                                break;
+
+                            case "texture_size":
+                                var largeTextures = AssetDatabase
+                                    .FindAssets("t:Texture2D")
+                                    .Select(AssetDatabase.GUIDToAssetPath)
+                                    .Select(path => new
+                                    {
+                                        path,
+                                        importer = AssetImporter.GetAtPath(path)
+                                            as TextureImporter
+                                    })
+                                    .Where(t => t.importer != null)
+                                    .Select(t => new
+                                    {
+                                        t.path,
+                                        maxSize = t.importer.maxTextureSize,
+                                        format = t.importer
+                                            .GetPlatformTextureSettings("Android").format
+                                    })
+                                    .Where(t => t.maxSize > 2048)
+                                    .ToList();
+                                results.Add(new
+                                {
+                                    check,
+                                    status = largeTextures.Count == 0 ? "pass" : "fail",
+                                    count = largeTextures.Count,
+                                    detail = largeTextures.Count > 0
+                                        ? largeTextures : null
+                                });
+                                break;
+
+                            default:
+                                results.Add(new
+                                {
+                                    check,
+                                    status = "unknown",
+                                    detail = $"Unknown check: {check}"
+                                });
+                                break;
+                        }
+                    }
+
+                    int failCount = results.Count(r =>
+                    {
+                        var d = (dynamic)r;
+                        return d.status == "fail";
+                    });
+                    return new SuccessResponse(
+                        $"Health check: {failCount} failed",
+                        new { results });
+                }
+
+                case "generate_report":
+                {
+                    string reportType = p.Get("reportType", "build_size");
+
+                    switch (reportType)
+                    {
+                        case "build_size":
+                            var report = BuildReport.GetLatestReport();
+                            if (report == null)
+                                return new ErrorResponse("NO_BUILD_REPORT",
+                                    "No build report found");
+                            return new SuccessResponse("Build size report", new
+                            {
+                                totalSize = report.summary.totalSize,
+                                result = report.summary.result.ToString(),
+                                platform = report.summary.platform.ToString(),
+                                files = report.files?.Select(f => new
+                                {
+                                    path = f.path,
+                                    size = f.size
+                                }).ToList()
+                            });
+
+                        case "asset_usage":
+                            var allAssets = AssetDatabase.FindAssets("")
+                                .Select(AssetDatabase.GUIDToAssetPath)
+                                .Where(p => !string.IsNullOrEmpty(p));
+                            var byType = allAssets
+                                .GroupBy(path =>
+                                {
+                                    var imp = AssetImporter.GetAtPath(path);
+                                    return imp?.GetType().Name ?? "Unknown";
+                                })
+                                .Select(g => new { type = g.Key, count = g.Count() })
+                                .OrderByDescending(a => a.count)
+                                .ToList();
+                            return new SuccessResponse("Asset usage report",
+                                new { assetCount = allAssets.Count(), byType });
+
+                        case "performance":
+                            return new SuccessResponse("Performance report", new
+                            {
+                                scriptCount = AssetDatabase
+                                    .FindAssets("t:MonoScript").Length,
+                                prefabCount = AssetDatabase
+                                    .FindAssets("t:Prefab").Length,
+                                sceneCount = AssetDatabase
+                                    .FindAssets("t:Scene").Length,
+                                textureMemory = UnityEngine.Profiling.Profiler
+                                    .GetTotalAllocatedMemoryLong()
+                            });
+
+                        default:
+                            return new ErrorResponse("UNKNOWN_REPORT_TYPE",
+                                $"Unknown report type: {reportType}");
+                    }
                 }
 
                 default:

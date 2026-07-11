@@ -28,7 +28,9 @@ CLIP_ACTIONS = [
     "clip_add_event", "clip_remove_event",
 ]
 
-ALL_ACTIONS = ANIMATOR_ACTIONS + CONTROLLER_ACTIONS + CLIP_ACTIONS #Not loaded in the MCP context, but will return this in the error response (1 Shot)
+MODEL_ACTIONS = ["list_model_clips"]
+
+ALL_ACTIONS = ANIMATOR_ACTIONS + CONTROLLER_ACTIONS + CLIP_ACTIONS + MODEL_ACTIONS  # Not loaded in the MCP context, but will return this in the error response (1 Shot)
 
 
 @mcp_for_unity_tool(
@@ -37,7 +39,8 @@ ALL_ACTIONS = ANIMATOR_ACTIONS + CONTROLLER_ACTIONS + CLIP_ACTIONS #Not loaded i
         "Manage Unity animation: Animator control and AnimationClip creation. "
         "Action prefixes: animator_* (play, crossfade, set parameters, get info), "
         "controller_* (create AnimatorControllers, add states/transitions/parameters), "
-        "clip_* (create clips, add keyframe curves, assign to GameObjects). "
+        "clip_* (create clips, add keyframe curves, assign to GameObjects), "
+        "list_model_clips (list animation clips embedded in an imported model). "
         "Action-specific parameters go in `properties` (keys match ManageAnimation.cs)."
     ),
     annotations=ToolAnnotations(
@@ -59,6 +62,7 @@ async def manage_animation(
         dict[str, Any] | str | None,
         "Action-specific parameters (dict or JSON string).",
     ] = None,
+    modelPath: Annotated[str | None, "Asset path to a model (FBX/GLB) for list_model_clips."] = None,
 ) -> dict[str, Any]:
     """Unified animation management tool."""
 
@@ -83,7 +87,7 @@ async def manage_animation(
                 "message": (
                     f"Unknown action '{action}'. Use prefixes: "
                     "animator_* (Animator control), controller_* (AnimatorController CRUD), "
-                    "clip_* (AnimationClip operations)."
+                    "clip_* (AnimationClip operations), or list_model_clips."
                 ),
             }
 
@@ -100,6 +104,8 @@ async def manage_animation(
         params_dict["clipPath"] = clip_path
     if controller_path is not None:
         params_dict["controllerPath"] = controller_path
+    if modelPath is not None:
+        params_dict["modelPath"] = modelPath
 
     params_dict = {k: v for k, v in params_dict.items() if v is not None}
 

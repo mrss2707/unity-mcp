@@ -87,6 +87,7 @@ namespace MCPForUnity.Editor.Tools.GameObjects
 
             try
             {
+                var p = new ToolParams(@params);
                 switch (action)
                 {
                     // --- Primary lifecycle actions (kept in manage_gameobject) ---
@@ -103,6 +104,64 @@ namespace MCPForUnity.Editor.Tools.GameObjects
                     case "look_at":
                         return GameObjectLookAt.Handle(@params, targetToken, searchMethod);
 
+                    case "set_sibling_index":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        int index = p.GetInt("index");
+                        int maxIndex = go.transform.parent != null
+                            ? go.transform.parent.childCount - 1 : 0;
+                        go.transform.SetSiblingIndex(Mathf.Clamp(index, 0, maxIndex));
+                        return new SuccessResponse(
+                            $"Set sibling index to {Mathf.Clamp(index, 0, maxIndex)}" +
+                            (index != Mathf.Clamp(index, 0, maxIndex)
+                                ? $" (clamped from {index})" : ""));
+                    }
+
+                    case "get_detailed_info":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        bool includeInactive = p.GetBool("includeInactive");
+                        string[] componentFilter = p.GetStringArray("componentFilter");
+
+                        var components = go.GetComponents<Component>()
+                            .Where(c => c != null)
+                            .Select(c => c.GetType().Name);
+                        if (componentFilter != null && componentFilter.Length > 0)
+                            components = components
+                                .Where(n => componentFilter.Any(f =>
+                                    n.Contains(f, StringComparison.OrdinalIgnoreCase)));
+
+                        int maxChildren = p.GetInt("maxChildren", 50);
+                        var children = go.GetComponentsInChildren<Transform>(includeInactive)
+                            .Skip(1).Take(maxChildren)
+                            .Select(t => t.name).ToList();
+
+                        var bounds = go.GetComponent<Renderer>()?.bounds;
+
+                        return new SuccessResponse("GameObject detailed info", new
+                        {
+                            name = go.name,
+                            active = go.activeSelf,
+                            tag = go.tag,
+                            layer = LayerMask.LayerToName(go.layer),
+                            isStatic = go.isStatic,
+                            components = components.ToList(),
+                            childCount = go.transform.childCount,
+                            children = children,
+                            bounds = bounds.HasValue ? new
+                            {
+                                center = bounds.Value.center,
+                                size = bounds.Value.size
+                            } : null,
+                            transform = new
+                            {
+                                position = go.transform.position,
+                                rotation = go.transform.rotation.eulerAngles,
+                                scale = go.transform.localScale
+                            }
+                        });
+                    }
+
                     default:
                         return new ErrorResponse($"Unknown action: '{action}'.");
                 }
@@ -112,6 +171,14 @@ namespace MCPForUnity.Editor.Tools.GameObjects
                 McpLog.Error($"[ManageGameObject] Action '{action}' failed: {e}");
                 return new ErrorResponse($"Internal error processing action '{action}': {e.Message}");
             }
+        }
+
+        private static GameObject FindGameObject(string path)
+        {
+            var go = GameObject.Find(path);
+            if (go == null)
+                throw new Exception($"GameObject not found: {path}");
+            return go;
         }
     }
 }

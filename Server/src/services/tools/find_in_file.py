@@ -1,7 +1,7 @@
 import base64
 import os
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import unquote, urlparse
 
 from fastmcp import Context
@@ -77,6 +77,9 @@ async def find_in_file(
     ctx: Context,
     uri: Annotated[str, "The resource URI to search under Assets/ or file path form supported by read_resource"],
     pattern: Annotated[str, "The regex pattern to search for"],
+    action: Annotated[Literal["search", "find_references"] | None, "Action: search (regex search in file) or find_references (find symbol references across project)."] = None,
+    symbolName: Annotated[str | None, "Symbol/class name to find references for (find_references action)."] = None,
+    scope: Annotated[str | None, "Search scope path (default: Assets)."] = None,
     project_root: Annotated[str | None, "Optional project root path"] = None,
     max_results: Annotated[int, "Cap results to avoid huge payloads"] = 200,
     ignore_case: Annotated[bool | str | None,
@@ -84,6 +87,22 @@ async def find_in_file(
 ) -> dict[str, Any]:
     # project_root is currently unused but kept for interface consistency
     unity_instance = await get_unity_instance_from_context(ctx)
+
+    # Handle find_references action — dispatch to Unity for project-wide symbol search
+    if action == "find_references":
+        if not symbolName:
+            return {"success": False, "message": "symbolName is required for find_references action."}
+        refs_params: dict[str, Any] = {"action": "find_references", "symbolName": symbolName}
+        if scope is not None:
+            refs_params["scope"] = scope
+        result = await send_with_unity_instance(
+            async_send_command_with_retry,
+            unity_instance,
+            "find_in_file",
+            refs_params,
+        )
+        return result if isinstance(result, dict) else {"success": False, "message": str(result)}
+
     await ctx.info(
         f"Processing find_in_file: {uri} (unity_instance={unity_instance or 'default'})")
 

@@ -15,6 +15,7 @@ from services.tools.manage_camera import (
     EXTENSION_ACTIONS,
     CONTROL_ACTIONS,
     CAPTURE_ACTIONS,
+    CINEMACHINE_ADVANCED_ACTIONS,
 )
 
 
@@ -52,6 +53,7 @@ def test_all_actions_is_union_of_sub_lists():
     expected = set(
         SETUP_ACTIONS + CREATION_ACTIONS + CONFIGURATION_ACTIONS
         + EXTENSION_ACTIONS + CONTROL_ACTIONS + CAPTURE_ACTIONS
+        + CINEMACHINE_ADVANCED_ACTIONS
     )
     assert set(ALL_ACTIONS) == expected
 
@@ -61,7 +63,7 @@ def test_no_duplicate_actions():
 
 
 def test_all_actions_count():
-    assert len(ALL_ACTIONS) == 18
+    assert len(ALL_ACTIONS) == 22
 
 
 # ---------------------------------------------------------------------------

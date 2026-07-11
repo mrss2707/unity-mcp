@@ -5,6 +5,7 @@ using System.Reflection;
 using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using MCPForUnity.Runtime.Helpers;
@@ -50,13 +51,154 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                return action switch
+                var p = new ToolParams(@params);
+
+                switch (action)
                 {
-                    "add" => AddComponent(@params, targetToken, searchMethod),
-                    "remove" => RemoveComponent(@params, targetToken, searchMethod),
-                    "set_property" => SetProperty(@params, targetToken, searchMethod),
-                    _ => new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property")
-                };
+                    case "add":
+                        return AddComponent(@params, targetToken, searchMethod);
+                    case "remove":
+                        return RemoveComponent(@params, targetToken, searchMethod);
+                    case "set_property":
+                        return SetProperty(@params, targetToken, searchMethod);
+                    case "get_property":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        string componentType = p.GetRequired("componentType");
+                        string propertyName = p.GetRequired("propertyName");
+
+                        var component = go.GetComponent(componentType);
+                        if (component == null)
+                            return new ErrorResponse("COMPONENT_NOT_FOUND",
+                                $"Component '{componentType}' not found on '{go.name}'.");
+
+                        var so = new SerializedObject(component);
+                        var prop = so.FindProperty(propertyName);
+                        if (prop == null)
+                            return new ErrorResponse("PROPERTY_NOT_FOUND",
+                                $"Property '{propertyName}' not found on {componentType}. " +
+                                $"Available: {GetSerializedPropertyNames(so)}");
+
+                        return new SuccessResponse("Property value",
+                            SerializedPropertyToDict(prop));
+                    }
+                    case "list_all":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        bool includeInactive = p.GetBool("includeInactive");
+                        var components = go.GetComponents<Component>()
+                            .Where(c => c != null)
+                            .Select(c => new {
+                                type = c.GetType().Name,
+                                fullName = c.GetType().FullName,
+                                assemblyName = c.GetType().Assembly.GetName().Name
+                            }).ToList();
+                        return new SuccessResponse("Components list", new { components });
+                    }
+                    case "add_simple_listener":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        string componentType = p.GetRequired("componentType");
+                        string eventName = p.GetRequired("eventName");
+                        var targetObj = FindGameObject(p.GetRequired("targetPath"));
+                        string methodName = p.GetRequired("methodName");
+
+                        var component = go.GetComponent(componentType);
+                        var so = new SerializedObject(component);
+                        var eventProp = so.FindProperty(eventName);
+                        if (eventProp == null)
+                            return new ErrorResponse("EVENT_NOT_FOUND",
+                                $"Event '{eventName}' not found on {componentType}.");
+
+                        int count = UnityEventTools.GetPersistentEventCount(eventProp);
+                        UnityEventTools.AddPersistentListener(eventProp);
+                        UnityEventTools.RegisterPersistentListener(eventProp, count,
+                            targetObj, methodName);
+                        so.ApplyModifiedProperties();
+                        return new SuccessResponse(
+                            $"Added persistent listener #{count}: {methodName} on {targetObj.name}");
+                    }
+                    case "add_param_listener":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        string componentType = p.GetRequired("componentType");
+                        string eventName = p.GetRequired("eventName");
+                        var targetObj = FindGameObject(p.GetRequired("targetPath"));
+                        string methodName = p.GetRequired("methodName");
+                        string paramType = p.GetRequired("paramType");
+                        string paramValue = p.GetRequired("paramValue");
+
+                        var component = go.GetComponent(componentType);
+                        var so = new SerializedObject(component);
+                        var eventProp = so.FindProperty(eventName);
+                        if (eventProp == null)
+                            return new ErrorResponse("EVENT_NOT_FOUND",
+                                $"Event '{eventName}' not found on {componentType}.");
+
+                        int count = UnityEventTools.GetPersistentEventCount(eventProp);
+                        UnityEventTools.AddPersistentListener(eventProp);
+                        UnityEventTools.RegisterPersistentListener(eventProp, count,
+                            targetObj, methodName);
+                        UnityEventTools.RegisterPersistentListenerArgument(eventProp, count,
+                            paramType switch
+                            {
+                                "int" => int.Parse(paramValue),
+                                "float" => float.Parse(paramValue),
+                                "string" => paramValue,
+                                "bool" => bool.Parse(paramValue),
+                                "Object" => targetObj,
+                                _ => throw new ArgumentException($"Unknown paramType: {paramType}")
+                            });
+                        so.ApplyModifiedProperties();
+                        return new SuccessResponse(
+                            $"Added persistent typed listener #{count}: {methodName}({paramType})");
+                    }
+                    case "remove_listener":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        string componentType = p.GetRequired("componentType");
+                        string eventName = p.GetRequired("eventName");
+                        int listenerIndex = p.GetInt("listenerIndex");
+
+                        var component = go.GetComponent(componentType);
+                        var so = new SerializedObject(component);
+                        var eventProp = so.FindProperty(eventName);
+                        if (eventProp == null)
+                            return new ErrorResponse("EVENT_NOT_FOUND",
+                                $"Event '{eventName}' not found on {componentType}.");
+
+                        UnityEventTools.RemovePersistentListener(eventProp, listenerIndex);
+                        so.ApplyModifiedProperties();
+                        return new SuccessResponse(
+                            $"Removed persistent listener at index {listenerIndex}");
+                    }
+                    case "get_listeners":
+                    {
+                        var go = FindGameObject(p.GetRequired("gameObjectPath"));
+                        string componentType = p.GetRequired("componentType");
+                        string eventName = p.GetRequired("eventName");
+
+                        var component = go.GetComponent(componentType);
+                        var so = new SerializedObject(component);
+                        var eventProp = so.FindProperty(eventName);
+                        if (eventProp == null)
+                            return new ErrorResponse("EVENT_NOT_FOUND",
+                                $"Event '{eventName}' not found on {componentType}.");
+
+                        int count = UnityEventTools.GetPersistentEventCount(eventProp);
+                        var listeners = new List<object>();
+                        for (int i = 0; i < count; i++)
+                        {
+                            var target = UnityEventTools.GetPersistentTarget(eventProp, i);
+                            var method = UnityEventTools.GetPersistentMethodName(eventProp, i);
+                            listeners.Add(new { index = i, target = target?.name, method });
+                        }
+                        return new SuccessResponse($"Found {count} listeners",
+                            new { count, listeners });
+                    }
+                    default:
+                        return new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property");
+                }
             }
             catch (Exception e)
             {
@@ -416,6 +558,48 @@ namespace MCPForUnity.Editor.Tools
 
             McpLog.Warn($"[ManageComponents] {error}");
             return error;
+        }
+
+        private static GameObject FindGameObject(string path)
+        {
+            var go = GameObject.Find(path);
+            if (go == null)
+                throw new Exception($"GameObject not found at path: {path}");
+            return go;
+        }
+
+        private static string GetSerializedPropertyNames(SerializedObject so)
+        {
+            var names = new List<string>();
+            var prop = so.GetIterator();
+            if (prop.Next(true))
+            {
+                do
+                {
+                    names.Add(prop.propertyPath);
+                } while (prop.Next(false));
+            }
+            return string.Join(", ", names);
+        }
+
+        private static object SerializedPropertyToDict(SerializedProperty prop)
+        {
+            return prop.propertyType switch
+            {
+                SerializedPropertyType.Integer => (object)prop.intValue,
+                SerializedPropertyType.Boolean => prop.boolValue,
+                SerializedPropertyType.Float => prop.floatValue,
+                SerializedPropertyType.String => prop.stringValue,
+                SerializedPropertyType.Color => new { r = prop.colorValue.r, g = prop.colorValue.g, b = prop.colorValue.b, a = prop.colorValue.a },
+                SerializedPropertyType.ObjectReference => prop.objectReferenceValue != null
+                    ? new { name = prop.objectReferenceValue.name, type = prop.objectReferenceValue.GetType().Name }
+                    : null,
+                SerializedPropertyType.Vector2 => new { x = prop.vector2Value.x, y = prop.vector2Value.y },
+                SerializedPropertyType.Vector3 => new { x = prop.vector3Value.x, y = prop.vector3Value.y, z = prop.vector3Value.z },
+                SerializedPropertyType.Vector4 => new { x = prop.vector4Value.x, y = prop.vector4Value.y, z = prop.vector4Value.z, w = prop.vector4Value.w },
+                SerializedPropertyType.Enum => prop.enumDisplayNames[prop.enumValueIndex],
+                _ => $"Unsupported type: {prop.propertyType}"
+            };
         }
 
         #endregion

@@ -28,7 +28,9 @@ CONTROL_ACTIONS = [
 
 CAPTURE_ACTIONS = ["screenshot", "screenshot_multiview"]
 
-ALL_ACTIONS = SETUP_ACTIONS + CREATION_ACTIONS + CONFIGURATION_ACTIONS + EXTENSION_ACTIONS + CONTROL_ACTIONS + CAPTURE_ACTIONS
+CINEMACHINE_ADVANCED_ACTIONS = ["create_dolly", "create_state_driven", "create_clearshot", "set_cinemachine_volume"]
+
+ALL_ACTIONS = SETUP_ACTIONS + CREATION_ACTIONS + CONFIGURATION_ACTIONS + EXTENSION_ACTIONS + CONTROL_ACTIONS + CAPTURE_ACTIONS + CINEMACHINE_ADVANCED_ACTIONS
 
 
 @mcp_for_unity_tool(
@@ -69,7 +71,12 @@ ALL_ACTIONS = SETUP_ACTIONS + CREATION_ACTIONS + CONFIGURATION_ACTIONS + EXTENSI
         "batch='surround' for 6-angle contact sheet, batch='orbit' for configurable grid, "
         "view_target/view_position for positioned capture, and capture_source='scene_view' to capture "
         "the active Unity Scene View viewport.\n"
-        "- screenshot_multiview: Shorthand for screenshot with batch='surround' and include_image=true."
+        "- screenshot_multiview: Shorthand for screenshot with batch='surround' and include_image=true.\n\n"
+        "CINEMACHINE ADVANCED (requires Cinemachine package):\n"
+        "- create_dolly: Create a CinemachineSmoothPath with waypoints and a dolly cart with VCam\n"
+        "- create_state_driven: Create a CinemachineStateDrivenCamera linked to an Animator\n"
+        "- create_clearshot: Create a CinemachineClearShot with child virtual cameras\n"
+        "- set_cinemachine_volume: Add CinemachineVolumeSettings extension to a VCam"
     ),
     annotations=ToolAnnotations(
         title="Manage Camera",
@@ -126,6 +133,16 @@ async def manage_camera(
         "Optional folder for screenshot output. Project-relative (e.g. 'Assets/Screenshots' or 'Captures') "
         "or absolute path inside the project. Overrides the user's Editor preference. "
         "If omitted, falls back to the Editor preference, then to the built-in default (Assets/Screenshots)."] = None,
+    # --- Parameters for Cinemachine advanced actions ---
+    trackPoints: Annotated[list[str] | None, "Array of waypoint positions as 'x,y,z' strings for create_dolly."] = None,
+    cartName: Annotated[str | None, "Name for the dolly cart GameObject (default: 'DollyCart')."] = None,
+    vcamPath: Annotated[str | None, "Path or name of the target virtual camera."] = None,
+    parentName: Annotated[str | None, "Name for the parent camera GameObject."] = None,
+    animatorPath: Annotated[str | None, "Path to the Animator for state-driven camera."] = None,
+    defaultCam: Annotated[str | None, "Default virtual camera for state-driven camera."] = None,
+    childVcams: Annotated[list[str] | None, "Child virtual camera names/paths for create_clearshot."] = None,
+    volumeProfilePath: Annotated[str | None, "Path to a Volume Profile asset for set_cinemachine_volume."] = None,
+    priority: Annotated[int | None, "Camera priority for set_cinemachine_volume."] = None,
 ) -> dict[str, Any] | ToolResult:
     """Unified camera management tool (Unity Camera + Cinemachine)."""
 
@@ -139,6 +156,7 @@ async def manage_camera(
             "Extensions": EXTENSION_ACTIONS,
             "Control": CONTROL_ACTIONS,
             "Capture": CAPTURE_ACTIONS,
+            "CinemachineAdvanced": CINEMACHINE_ADVANCED_ACTIONS,
         }
         category_list = "; ".join(
             f"{cat}: {', '.join(actions)}" for cat, actions in categories.items()
@@ -183,6 +201,21 @@ async def manage_camera(
         )
         if err is not None:
             return err
+
+    # Cinemachine advanced params
+    for key, val in [
+        ("trackPoints", trackPoints),
+        ("cartName", cartName),
+        ("vcamPath", vcamPath),
+        ("parentName", parentName),
+        ("animatorPath", animatorPath),
+        ("defaultCam", defaultCam),
+        ("childVcams", childVcams),
+        ("volumeProfilePath", volumeProfilePath),
+        ("priority", priority),
+    ]:
+        if val is not None:
+            params_dict[key] = val
 
     result = await send_with_unity_instance(
         async_send_command_with_retry,

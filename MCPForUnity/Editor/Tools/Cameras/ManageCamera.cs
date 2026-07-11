@@ -85,6 +85,15 @@ namespace MCPForUnity.Editor.Tools.Cameras
 
                 switch (action)
                 {
+                    case "create_clearshot":
+                        return CameraCreate.CreateClearshot(p);
+
+                    case "create_dolly":
+                        return CameraCreate.CreateDolly(p);
+
+                    case "create_state_driven":
+                        return CameraCreate.CreateStateDriven(p);
+
                     case "ensure_brain":
                         return CameraCreate.EnsureBrain(@params);
 
@@ -99,6 +108,9 @@ namespace MCPForUnity.Editor.Tools.Cameras
 
                     case "set_noise":
                         return CameraConfigure.SetNoise(@params);
+
+                    case "set_cinemachine_volume":
+                        return CameraCreate.SetCinemachineVolume(p);
 
                     case "add_extension":
                         return CameraConfigure.AddExtension(@params);
@@ -119,8 +131,10 @@ namespace MCPForUnity.Editor.Tools.Cameras
                         return new ErrorResponse(
                             $"Unknown action: '{action}'. Valid actions: ping, create_camera, set_target, "
                             + "set_lens, set_priority, list_cameras, screenshot, screenshot_multiview, "
+                            + "create_clearshot, create_dolly, create_state_driven, "
                             + "ensure_brain, get_brain_status, "
-                            + "set_body, set_aim, set_noise, add_extension, remove_extension, "
+                            + "set_body, set_aim, set_noise, set_cinemachine_volume, "
+                            + "add_extension, remove_extension, "
                             + "set_blend, force_camera, release_override.");
                 }
             }

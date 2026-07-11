@@ -26,9 +26,11 @@ FRAME_DEBUGGER_ACTIONS = [
 
 UTILITY_ACTIONS = ["ping"]
 
+GPU_ACTIONS = ["get_draw_calls", "get_gpu_profile"]
+
 ALL_ACTIONS = (
     UTILITY_ACTIONS + SESSION_ACTIONS + COUNTER_ACTIONS
-    + MEMORY_SNAPSHOT_ACTIONS + FRAME_DEBUGGER_ACTIONS
+    + MEMORY_SNAPSHOT_ACTIONS + FRAME_DEBUGGER_ACTIONS + GPU_ACTIONS
 )
 
 
@@ -52,7 +54,10 @@ ALL_ACTIONS = (
         "FRAME DEBUGGER:\n"
         "- frame_debugger_enable: Turn on Frame Debugger, report event count\n"
         "- frame_debugger_disable: Turn off Frame Debugger\n"
-        "- frame_debugger_get_events: Get draw call events (paged, best-effort via reflection)"
+        "- frame_debugger_get_events: Get draw call events (paged, best-effort via reflection)\n\n"
+        "GPU PROFILING:\n"
+        "- get_draw_calls: Get draw call count, batched draws, SetPass calls per frame\n"
+        "- get_gpu_profile: GPU time per-category (opaque, transparent, shadows, post-processing)"
     ),
     annotations=ToolAnnotations(
         title="Manage Profiler",
@@ -75,6 +80,7 @@ async def manage_profiler(
     snapshot_b: Annotated[Optional[str], "Second snapshot path for memory_compare_snapshots."] = None,
     page_size: Annotated[Optional[int], "Page size for frame_debugger_get_events (default 50)."] = None,
     cursor: Annotated[Optional[int], "Cursor offset for frame_debugger_get_events."] = None,
+    frameIndex: Annotated[Optional[int], "Target frame index for get_draw_calls (-1 for latest)."] = None,
 ) -> dict[str, Any]:
     action_lower = action.lower()
     if action_lower not in ALL_ACTIONS:
@@ -95,6 +101,7 @@ async def manage_profiler(
         "snapshot_path": snapshot_path, "search_path": search_path,
         "snapshot_a": snapshot_a, "snapshot_b": snapshot_b,
         "page_size": page_size, "cursor": cursor,
+        "frameIndex": frameIndex,
     }
     for key, val in param_map.items():
         if val is not None:

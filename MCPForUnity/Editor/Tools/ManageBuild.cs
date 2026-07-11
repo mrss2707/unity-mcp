@@ -15,7 +15,8 @@ namespace MCPForUnity.Editor.Tools
     public static class ManageBuild
     {
         private static readonly string[] ValidActions =
-            { "build", "status", "platform", "settings", "scenes", "profiles", "batch", "cancel" };
+            { "build", "status", "platform", "settings", "scenes", "profiles", "batch", "cancel",
+              "configure_code_generation", "configure_aab", "get_build_report" };
 
         public static object HandleCommand(JObject @params)
         {
@@ -45,6 +46,106 @@ namespace MCPForUnity.Editor.Tools
                     case "profiles": return HandleProfiles(p);
                     case "batch": return HandleBatch(p);
                     case "cancel": return HandleCancel(p);
+                    case "configure_code_generation":
+                    {
+                        string platform = p.GetRequired("platform");
+                        var target = BuildTargetMapping.GetBuildTarget(platform);
+                        string backend = p.GetRequired("scriptingBackend");
+                        string stripping = p.GetRequired("strippingLevel");
+                        string compilerConfig = p.Get("compilerConfig", "Release");
+                        string[] preserve = p.GetStringArray("preserveAssemblies");
+
+                        var namedTarget = NamedBuildTarget.FromBuildTargetGroup(
+                            BuildPipeline.GetBuildTargetGroup(target));
+
+                        PlayerSettings.SetScriptingBackend(namedTarget,
+                            backend == "IL2CPP"
+                                ? ScriptingImplementation.IL2CPP
+                                : ScriptingImplementation.Mono2x);
+
+                        PlayerSettings.SetIl2CppCompilerConfiguration(namedTarget,
+                            compilerConfig switch
+                            {
+                                "Debug" => Il2CppCompilerConfiguration.Debug,
+                                "Master" => Il2CppCompilerConfiguration.Master,
+                                _ => Il2CppCompilerConfiguration.Release
+                            });
+
+                        PlayerSettings.strippingLevel = stripping switch
+                        {
+                            "Disabled" => StrippingLevel.Disabled,
+                            "Low" => StrippingLevel.StripAssemblies,
+                            "Medium" => StrippingLevel.StripByteCode,
+                            "High" => StrippingLevel.UseMicroMSCorlib,
+                            _ => StrippingLevel.StripAssemblies
+                        };
+
+                        if (preserve != null && preserve.Length > 0)
+                        {
+                            var linkXml = new System.Text.StringBuilder();
+                            linkXml.AppendLine("<linker>");
+                            foreach (var asm in preserve)
+                                linkXml.AppendLine(
+                                    $"  <assembly fullname=\"{asm}\" preserve=\"all\"/>");
+                            linkXml.AppendLine("</linker>");
+                            string path = "Assets/link.xml";
+                            System.IO.File.WriteAllText(path, linkXml.ToString());
+                            AssetDatabase.Refresh();
+                        }
+
+                        return new SuccessResponse(
+                            $"Configured code generation for {platform}: " +
+                            $"{backend} backend, {stripping} stripping, {compilerConfig} config");
+                    }
+                    case "configure_aab":
+                    {
+                        int versionCode = p.GetInt("bundleVersionCode");
+                        string keystorePath = p.Get("keystorePath");
+                        string keyAlias = p.Get("keyAlias");
+
+                        PlayerSettings.Android.bundleVersionCode = versionCode;
+                        PlayerSettings.Android.buildApkPerCpuArchitecture = true;
+
+                        if (!string.IsNullOrEmpty(keystorePath))
+                        {
+                            if (!System.IO.File.Exists(keystorePath))
+                                return new ErrorResponse("KEYSTORE_NOT_FOUND",
+                                    $"Keystore not found at: {keystorePath}");
+                        }
+                        if (!string.IsNullOrEmpty(keyAlias))
+                        {
+                            PlayerSettings.Android.keyaliasName = keyAlias;
+                        }
+
+                        return new SuccessResponse(
+                            $"Configured AAB: versionCode={versionCode}");
+                    }
+                    case "get_build_report":
+                    {
+                        string buildPath = p.Get("buildPath");
+                        var report = string.IsNullOrEmpty(buildPath)
+                            ? BuildReport.GetLatestReport()
+                            : BuildReport.GetReport(buildPath);
+
+                        if (report == null)
+                            return new ErrorResponse("NO_BUILD_REPORT",
+                                "No build report found. Run manage_build(action='build') first.");
+
+                        return new SuccessResponse("Build report", new
+                        {
+                            totalSize = report.summary.totalSize,
+                            result = report.summary.result.ToString(),
+                            buildStarted = report.summary.buildStartedAt,
+                            buildEnded = report.summary.buildEndedAt,
+                            platform = report.summary.platform.ToString(),
+                            files = report.files?.Select(f => new
+                            {
+                                path = f.path,
+                                size = f.size,
+                                role = f.role
+                            }).ToList()
+                        });
+                    }
                     default:
                         return new ErrorResponse($"Unknown action: '{action}'");
                 }

@@ -1,6 +1,6 @@
 """Build management — player builds, platform switching, settings, batch automation."""
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from fastmcp import Context
 from mcp.types import ToolAnnotations
@@ -20,6 +20,9 @@ ALL_ACTIONS = [
     "profiles",
     "batch",
     "cancel",
+    "configure_code_generation",
+    "configure_aab",
+    "get_build_report",
 ]
 
 
@@ -39,7 +42,8 @@ async def _send_build_command(
     description=(
         "Manage Unity player builds — trigger builds, switch platforms, configure settings, "
         "manage build scenes and profiles, run batch builds across platforms. "
-        "Actions: build, status, platform, settings, scenes, profiles, batch, cancel."
+        "Actions: build, status, platform, settings, scenes, profiles, batch, cancel, "
+        "configure_code_generation, configure_aab, get_build_report."
     ),
     annotations=ToolAnnotations(
         title="Manage Build",
@@ -65,6 +69,15 @@ async def manage_build(
     profiles: Annotated[Optional[str], "JSON array of profile paths for batch build (Unity 6+)"] = None,
     output_dir: Annotated[Optional[str], "Base output directory for batch builds"] = None,
     job_id: Annotated[Optional[str], "Job ID for status/cancel"] = None,
+    # --- Parameters for new actions ---
+    scriptingBackend: Annotated[Literal["Mono", "IL2CPP"] | None, "Scripting backend for configure_code_generation."] = None,
+    strippingLevel: Annotated[Literal["Disabled", "Low", "Medium", "High"] | None, "Managed stripping level for configure_code_generation."] = None,
+    compilerConfig: Annotated[Literal["Debug", "Release", "Master"] | None, "IL2CPP compiler configuration."] = None,
+    preserveAssemblies: Annotated[list[str] | None, "Assemblies to preserve from stripping (generates link.xml)."] = None,
+    bundleVersionCode: Annotated[int | None, "Android bundle version code for configure_aab."] = None,
+    keystorePath: Annotated[str | None, "Path to keystore for configure_aab (read from env/OS keychain only)."] = None,
+    keyAlias: Annotated[str | None, "Key alias for configure_aab."] = None,
+    buildPath: Annotated[str | None, "Path to build report for get_build_report."] = None,
 ) -> dict[str, Any]:
     action_lower = action.lower()
     if action_lower not in ALL_ACTIONS:
@@ -101,6 +114,14 @@ async def manage_build(
         "profiles": parsed_profiles,
         "output_dir": output_dir,
         "job_id": job_id,
+        "scriptingBackend": scriptingBackend,
+        "strippingLevel": strippingLevel,
+        "compilerConfig": compilerConfig,
+        "preserveAssemblies": preserveAssemblies,
+        "bundleVersionCode": bundleVersionCode,
+        "keystorePath": keystorePath,
+        "keyAlias": keyAlias,
+        "buildPath": buildPath,
     }
 
     for key, val in param_map.items():

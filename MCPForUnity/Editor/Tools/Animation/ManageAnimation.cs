@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using MCPForUnity.Editor.Helpers;
+using UnityEditor;
 using UnityEngine;
 
 namespace MCPForUnity.Editor.Tools.Animation
@@ -186,6 +188,11 @@ namespace MCPForUnity.Editor.Tools.Animation
                     return HandleClipAction(normalizedParams, actionLower.Substring(5));
                 }
 
+                if (actionLower == "list_model_clips")
+                {
+                    return HandleListModelClips(normalizedParams);
+                }
+
                 return new { success = false, message = $"Unknown action: {action}. Actions must be prefixed with: animator_, controller_, or clip_" };
             }
             catch (Exception e)
@@ -248,6 +255,54 @@ namespace MCPForUnity.Editor.Tools.Animation
                 default:
                     return new { success = false, message = $"Unknown clip action: {action}. Valid: create, get_info, add_curve, set_curve, set_vector_curve, create_preset, assign, add_event, remove_event" };
             }
+        }
+
+        private static object HandleListModelClips(JObject @params)
+        {
+            var p = new ToolParams(@params);
+            string modelPath = p.GetRequired("modelPath");
+            var importer = AssetImporter.GetAtPath(modelPath);
+            if (importer == null)
+                return new ErrorResponse("ASSET_NOT_FOUND",
+                    $"No asset at path: {modelPath}");
+
+            var modelImporter = importer as ModelImporter;
+            if (modelImporter == null)
+                return new ErrorResponse("NOT_A_MODEL_ASSET",
+                    $"Asset at {modelPath} is not a model. " +
+                    $"Type: {importer.GetType().Name}");
+
+            var clipAnimations = modelImporter.clipAnimations;
+            if (clipAnimations == null || clipAnimations.Length == 0)
+                return new SuccessResponse("No animation clips in model",
+                    new { clips = new object[0] });
+
+            var clips = new List<object>();
+            foreach (var ca in clipAnimations)
+            {
+                var allAssets = AssetDatabase.LoadAllAssetsAtPath(modelPath);
+                var clip = allAssets
+                    .OfType<AnimationClip>()
+                    .FirstOrDefault(c => c.name == ca.name);
+
+                clips.Add(new
+                {
+                    name = ca.name,
+                    firstFrame = ca.firstFrame,
+                    lastFrame = ca.lastFrame,
+                    loopTime = clip?.isLooping ?? ca.loopTime,
+                    length = clip?.length ?? 0f,
+                    wrapMode = clip?.wrapMode.ToString(),
+                    events = clip?.events?.Select(e => new
+                    {
+                        functionName = e.functionName,
+                        time = e.time
+                    }).ToList()
+                });
+            }
+
+            return new SuccessResponse($"Found {clips.Count} animation clips",
+                new { clips });
         }
     }
 }

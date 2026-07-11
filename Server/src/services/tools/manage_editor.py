@@ -17,13 +17,19 @@ from transport.legacy.unity_connection import async_send_command_with_retry
 )
 async def manage_editor(
     ctx: Context,
-    action: Annotated[Literal["telemetry_status", "telemetry_ping", "play", "pause", "stop", "set_active_tool", "add_tag", "remove_tag", "add_layer", "remove_layer", "deploy_package", "restore_package", "undo", "redo"], "Get and update the Unity Editor state. deploy_package copies the configured MCPForUnity source into the project's package location (triggers recompile). restore_package reverts the last deployment from backup. undo/redo perform editor undo/redo. For prefab editing (open/save/close prefab stage), use manage_prefabs."],
+    action: Annotated[Literal["telemetry_status", "telemetry_ping", "play", "pause", "stop", "set_active_tool", "add_tag", "remove_tag", "add_layer", "remove_layer", "deploy_package", "restore_package", "undo", "redo", "create_folder_structure", "run_health_check", "generate_report"], "Get and update the Unity Editor state. deploy_package copies the configured MCPForUnity source into the project's package location (triggers recompile). restore_package reverts the last deployment from backup. undo/redo perform editor undo/redo. create_folder_structure creates standard Unity folder hierarchy. run_health_check runs project health diagnostics. generate_report generates project reports. For prefab editing (open/save/close prefab stage), use manage_prefabs."],
     tool_name: Annotated[str,
                          "Tool name when setting active tool"] | None = None,
     tag_name: Annotated[str,
                         "Tag name when adding and removing tags"] | None = None,
     layer_name: Annotated[str,
                           "Layer name when adding and removing layers"] | None = None,
+    # --- Parameters for new actions ---
+    structure: Annotated[Literal["default", "urp", "hdrp", "custom"] | None, "Folder structure preset for create_folder_structure."] = None,
+    rootPath: Annotated[str | None, "Root path for create_folder_structure (must be within Assets/)."] = None,
+    checks: Annotated[list[Literal["compile", "prefab", "missing_ref", "texture_size"]] | None, "Health checks to run for run_health_check."] = None,
+    reportType: Annotated[Literal["build_size", "asset_usage", "performance"] | None, "Report type for generate_report."] = None,
+    folders: Annotated[list[str] | None, "Custom folder list for create_folder_structure with structure='custom'."] = None,
 ) -> dict[str, Any]:
     # Get active instance from request state (injected by middleware)
     unity_instance = await get_unity_instance_from_context(ctx)
@@ -43,6 +49,11 @@ async def manage_editor(
             "toolName": tool_name,
             "tagName": tag_name,
             "layerName": layer_name,
+            "structure": structure,
+            "rootPath": rootPath,
+            "checks": checks,
+            "reportType": reportType,
+            "folders": folders,
         }
         params = {k: v for k, v in params.items() if v is not None}
 

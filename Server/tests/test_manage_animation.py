@@ -13,6 +13,7 @@ from services.tools.manage_animation import (
     ANIMATOR_ACTIONS,
     CONTROLLER_ACTIONS,
     CLIP_ACTIONS,
+    MODEL_ACTIONS,
 )
 
 
@@ -49,7 +50,7 @@ class TestActionLists:
     """Verify action list completeness and consistency."""
 
     def test_all_actions_includes_all_prefixes(self):
-        assert set(ALL_ACTIONS) == set(ANIMATOR_ACTIONS + CONTROLLER_ACTIONS + CLIP_ACTIONS)
+        assert set(ALL_ACTIONS) == set(ANIMATOR_ACTIONS + CONTROLLER_ACTIONS + CLIP_ACTIONS + MODEL_ACTIONS)
 
     def test_animator_actions_prefixed(self):
         for a in ANIMATOR_ACTIONS:

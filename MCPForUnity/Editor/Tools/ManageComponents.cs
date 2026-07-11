@@ -264,7 +264,7 @@ namespace MCPForUnity.Editor.Tools
                             new { count = gCount, listeners });
                     }
                     default:
-                        return new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property");
+                        return new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property, get_property, list_all, add_simple_listener, add_param_listener, remove_listener, get_listeners");
                 }
             }
             catch (Exception e)

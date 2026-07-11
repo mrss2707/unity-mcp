@@ -628,6 +628,15 @@ namespace MCPForUnity.Editor.Clients
         public override bool IsInstalled => MCPServiceLocator.Paths.IsClaudeCliDetected();
 
         /// <summary>
+        /// Resolves the CLI binary path for this configurator.
+        /// Override to use a different CLI binary (e.g. PaiCode uses paicode instead of claude).
+        /// </summary>
+        internal virtual string ResolveCliPath()
+        {
+            return MCPServiceLocator.Paths.GetClaudeCliPath();
+        }
+
+        /// <summary>
         /// Returns the project directory that CLI-based configurators will use as the working directory
         /// for `claude mcp add/remove --scope local`. Checks for an explicit override in EditorPrefs
         /// first, then falls back to the current Unity project directory.
@@ -663,7 +672,7 @@ namespace MCPForUnity.Editor.Clients
             string projectDir = GetClientProjectDir();
             bool useHttpTransport = EditorConfigurationCache.Instance.UseHttpTransport;
             // Resolve claudePath on the main thread (EditorPrefs access)
-            string claudePath = MCPServiceLocator.Paths.GetClaudeCliPath();
+            string claudePath = ResolveCliPath();
             RuntimePlatform platform = Application.platform;
             bool isRemoteScope = HttpEndpointUtility.IsRemoteScope();
             // Get expected package source for the installed package version (matches what Register() would use)
@@ -947,7 +956,7 @@ namespace MCPForUnity.Editor.Clients
         private void Register()
         {
             var pathService = MCPServiceLocator.Paths;
-            string claudePath = pathService.GetClaudeCliPath();
+            string claudePath = ResolveCliPath();
             if (string.IsNullOrEmpty(claudePath))
             {
                 throw new InvalidOperationException("Claude CLI not found. Please install Claude Code first.");
@@ -1033,7 +1042,7 @@ namespace MCPForUnity.Editor.Clients
         public override void Unregister()
         {
             var pathService = MCPServiceLocator.Paths;
-            string claudePath = pathService.GetClaudeCliPath();
+            string claudePath = ResolveCliPath();
 
             if (string.IsNullOrEmpty(claudePath))
             {

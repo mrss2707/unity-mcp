@@ -20,6 +20,7 @@ namespace MCPForUnity.Editor.Services
 
         public bool HasUvxPathOverride => !string.IsNullOrEmpty(EditorPrefs.GetString(EditorPrefKeys.UvxPathOverride, null));
         public bool HasClaudeCliPathOverride => !string.IsNullOrEmpty(EditorPrefs.GetString(EditorPrefKeys.ClaudeCliPathOverride, null));
+        public bool HasPaiCodeCliPathOverride => !string.IsNullOrEmpty(EditorPrefs.GetString(EditorPrefKeys.PaiCodeCliPathOverride, null));
         public bool HasUvxPathFallback => _hasUvxPathFallback;
 
         public string GetUvxPath()
@@ -163,6 +164,58 @@ namespace MCPForUnity.Editor.Services
             return null;
         }
 
+        public string GetPaiCodeCliPath()
+        {
+            // Check override first - only validate if explicitly set
+            if (HasPaiCodeCliPathOverride)
+            {
+                string overridePath = EditorPrefs.GetString(EditorPrefKeys.PaiCodeCliPathOverride, string.Empty);
+                if (File.Exists(overridePath))
+                    return overridePath;
+                return null;
+            }
+
+            // No override - use platform-specific discovery
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+#if UNITY_EDITOR_WIN
+                foreach (var name in new[] { "paicode.exe", "paicode.cmd", "paicode.ps1", "paicode" })
+                {
+                    string fromPath = ExecPath.FindInPathWindows(name);
+                    if (!string.IsNullOrEmpty(fromPath)) return fromPath;
+                }
+#endif
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                string[] candidates = new[]
+                {
+                    "/opt/homebrew/bin/paicode",
+                    "/usr/local/bin/paicode",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "paicode")
+                };
+                foreach (var c in candidates)
+                {
+                    if (File.Exists(c)) return c;
+                }
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                string[] candidates = new[]
+                {
+                    "/usr/bin/paicode",
+                    "/usr/local/bin/paicode",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "paicode")
+                };
+                foreach (var c in candidates)
+                {
+                    if (File.Exists(c)) return c;
+                }
+            }
+
+            return null;
+        }
+
         public bool IsPythonDetected()
         {
             return ExecPath.TryRun(
@@ -177,6 +230,11 @@ namespace MCPForUnity.Editor.Services
         public bool IsClaudeCliDetected()
         {
             return !string.IsNullOrEmpty(GetClaudeCliPath());
+        }
+
+        public bool IsPaiCodeCliDetected()
+        {
+            return !string.IsNullOrEmpty(GetPaiCodeCliPath());
         }
 
         public void SetUvxPathOverride(string path)
@@ -219,6 +277,27 @@ namespace MCPForUnity.Editor.Services
         public void ClearClaudeCliPathOverride()
         {
             EditorPrefs.DeleteKey(EditorPrefKeys.ClaudeCliPathOverride);
+        }
+
+        public void SetPaiCodeCliPathOverride(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                ClearPaiCodeCliPathOverride();
+                return;
+            }
+
+            if (!File.Exists(path))
+            {
+                throw new ArgumentException("The selected PaiCode CLI executable does not exist");
+            }
+
+            EditorPrefs.SetString(EditorPrefKeys.PaiCodeCliPathOverride, path);
+        }
+
+        public void ClearPaiCodeCliPathOverride()
+        {
+            EditorPrefs.DeleteKey(EditorPrefKeys.PaiCodeCliPathOverride);
         }
 
         /// <summary>

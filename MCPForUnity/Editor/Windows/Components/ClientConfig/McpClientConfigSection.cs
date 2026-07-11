@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using MCPForUnity.Editor.Clients;
+using MCPForUnity.Editor.Clients.Configurators;
 using MCPForUnity.Editor.Constants;
 using MCPForUnity.Editor.Helpers;
 using MCPForUnity.Editor.Models;
@@ -249,10 +250,11 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
 
             var client = configurators[selectedClientIndex];
 
-            if (client is ClaudeCliMcpConfigurator)
+            if (client is ClaudeCliMcpConfigurator cliConfigurator)
             {
-                string claudePath = MCPServiceLocator.Paths.GetClaudeCliPath();
-                if (string.IsNullOrEmpty(claudePath))
+                string cliPath = cliConfigurator.ResolveCliPath()
+                    ?? MCPServiceLocator.Paths.GetClaudeCliPath();
+                if (string.IsNullOrEmpty(cliPath))
                 {
                     claudeCliPathRow.style.display = DisplayStyle.Flex;
                     claudeCliPath.value = "Not found - click Browse to select";
@@ -260,7 +262,7 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
                 else
                 {
                     claudeCliPathRow.style.display = DisplayStyle.Flex;
-                    claudeCliPath.value = claudePath;
+                    claudeCliPath.value = cliPath;
                 }
             }
             else
@@ -384,7 +386,9 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
             // Capture ALL main-thread-only values before async task
             string projectDir = ClaudeCliMcpConfigurator.GetClientProjectDir();
             bool useHttpTransport = EditorConfigurationCache.Instance.UseHttpTransport;
-            string claudePath = MCPServiceLocator.Paths.GetClaudeCliPath();
+            string claudePath = (client is ClaudeCliMcpConfigurator cliCfg)
+                ? cliCfg.ResolveCliPath() ?? MCPServiceLocator.Paths.GetClaudeCliPath()
+                : MCPServiceLocator.Paths.GetClaudeCliPath();
             string httpUrl = HttpEndpointUtility.GetMcpRpcUrl();
             var (uvxPath, _, packageName) = AssetPathUtility.GetUvxCommandParts();
             string fromArgs = AssetPathUtility.GetBetaServerFromArgs(quoteFromPath: true);
@@ -522,18 +526,25 @@ namespace MCPForUnity.Editor.Windows.Components.ClientConfig
 
         private void OnBrowseClaudeClicked()
         {
+            bool isPaiCode = selectedClientIndex >= 0 && selectedClientIndex < configurators.Count
+                && configurators[selectedClientIndex] is PaiCodeConfigurator;
+
+            string title = isPaiCode ? "Select PaiCode CLI" : "Select Claude CLI";
             string suggested = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
                 ? "/opt/homebrew/bin"
                 : Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            string picked = EditorUtility.OpenFilePanel("Select Claude CLI", suggested, "");
+            string picked = EditorUtility.OpenFilePanel(title, suggested, "");
             if (!string.IsNullOrEmpty(picked))
             {
                 try
                 {
-                    MCPServiceLocator.Paths.SetClaudeCliPathOverride(picked);
+                    if (isPaiCode)
+                        MCPServiceLocator.Paths.SetPaiCodeCliPathOverride(picked);
+                    else
+                        MCPServiceLocator.Paths.SetClaudeCliPathOverride(picked);
                     UpdateClaudeCliPathVisibility();
                     UpdateClientStatus();
-                    McpLog.Info($"Claude CLI path override set to: {picked}");
+                    McpLog.Info($"{(isPaiCode ? "PaiCode" : "Claude")} CLI path override set to: {picked}");
                 }
                 catch (Exception ex)
                 {

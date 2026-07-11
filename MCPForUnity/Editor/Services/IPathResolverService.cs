@@ -18,6 +18,12 @@ namespace MCPForUnity.Editor.Services
         string GetClaudeCliPath();
 
         /// <summary>
+        /// Gets the PaiCode CLI path (respects override if set)
+        /// </summary>
+        /// <returns>Path to the paicode executable, or null if not found</returns>
+        string GetPaiCodeCliPath();
+
+        /// <summary>
         /// Checks if Python is detected on the system
         /// </summary>
         /// <returns>True if Python is found</returns>
@@ -28,6 +34,12 @@ namespace MCPForUnity.Editor.Services
         /// </summary>
         /// <returns>True if Claude CLI is found</returns>
         bool IsClaudeCliDetected();
+
+        /// <summary>
+        /// Checks if PaiCode CLI is detected on the system
+        /// </summary>
+        /// <returns>True if PaiCode CLI is found</returns>
+        bool IsPaiCodeCliDetected();
 
         /// <summary>
         /// Sets an override for the uvx path
@@ -42,6 +54,12 @@ namespace MCPForUnity.Editor.Services
         void SetClaudeCliPathOverride(string path);
 
         /// <summary>
+        /// Sets an override for the PaiCode CLI path
+        /// </summary>
+        /// <param name="path">Path to override with</param>
+        void SetPaiCodeCliPathOverride(string path);
+
+        /// <summary>
         /// Clears the uvx path override
         /// </summary>
         void ClearUvxPathOverride();
@@ -52,6 +70,11 @@ namespace MCPForUnity.Editor.Services
         void ClearClaudeCliPathOverride();
 
         /// <summary>
+        /// Clears the PaiCode CLI path override
+        /// </summary>
+        void ClearPaiCodeCliPathOverride();
+
+        /// <summary>
         /// Gets whether a uvx path override is active
         /// </summary>
         bool HasUvxPathOverride { get; }
@@ -60,6 +83,11 @@ namespace MCPForUnity.Editor.Services
         /// Gets whether a Claude CLI path override is active
         /// </summary>
         bool HasClaudeCliPathOverride { get; }
+
+        /// <summary>
+        /// Gets whether a PaiCode CLI path override is active
+        /// </summary>
+        bool HasPaiCodeCliPathOverride { get; }
 
         /// <summary>
         /// Gets whether the uvx path used a fallback from override to system path

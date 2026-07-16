@@ -184,7 +184,16 @@ namespace MCPForUnity.Editor.Services
 
         public bool IsPaiCodeCliDetected()
         {
-            return !string.IsNullOrEmpty(GetPaiCodeCliPath());
+            // Check if paicode binary is found (override or PATH discovery)
+            if (!string.IsNullOrEmpty(GetPaiCodeCliPath()))
+                return true;
+
+            // Fallback: check if ~/.paicode.json exists — PaiCode writes its
+            // config (including MCP servers) here, so the file's presence is a
+            // reliable signal that PaiCode is installed even when the binary
+            // isn't on PATH.
+            string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return File.Exists(Path.Combine(homeDir, ".paicode.json"));
         }
 
         public void SetUvxPathOverride(string path)

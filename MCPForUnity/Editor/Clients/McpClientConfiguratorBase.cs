@@ -623,9 +623,21 @@ namespace MCPForUnity.Editor.Clients
         public override bool SupportsAutoConfigure => true;
         public override string GetConfigureActionLabel() => client.status == McpStatus.Configured ? "Unregister" : "Configure";
 
-        public override string GetConfigPath() => "Managed via Claude CLI";
+        public override string GetConfigPath() => $"Managed via {CliName} CLI";
 
         public override bool IsInstalled => MCPServiceLocator.Paths.IsClaudeCliDetected();
+
+        /// <summary>
+        /// Human-readable CLI name used in error messages (e.g. "Claude" or "PaiCode").
+        /// Override in subclasses that wrap a different CLI binary.
+        /// </summary>
+        protected virtual string CliName => "Claude";
+
+        /// <summary>
+        /// Full "CLI not found" error message.
+        /// </summary>
+        private string CliNotFoundMessage =>
+            $"{CliName} CLI not found. Please install {CliName} Code first.";
 
         /// <summary>
         /// Resolves the CLI binary path for this configurator.
@@ -698,7 +710,7 @@ namespace MCPForUnity.Editor.Clients
             {
                 if (string.IsNullOrEmpty(claudePath))
                 {
-                    client.SetStatus(McpStatus.NotConfigured, "Claude CLI not found");
+                    client.SetStatus(McpStatus.NotConfigured, $"{CliName} CLI not found");
                     client.configuredTransport = Models.ConfiguredTransport.Unknown;
                     return client.status;
                 }
@@ -823,7 +835,7 @@ namespace MCPForUnity.Editor.Clients
                     {
                         if (hasTransportMismatch)
                         {
-                            string errorMsg = $"Transport mismatch: Claude Code is registered with {(registeredWithHttp ? "HTTP" : "stdio")} but current setting is {(currentUseHttp ? "HTTP" : "stdio")}. Click Configure to re-register.";
+                            string errorMsg = $"Transport mismatch: {DisplayName} is registered with {(registeredWithHttp ? "HTTP" : "stdio")} but current setting is {(currentUseHttp ? "HTTP" : "stdio")}. Click Configure to re-register.";
                             client.SetStatus(McpStatus.Error, errorMsg);
                             McpLog.Warn(errorMsg);
                         }
@@ -840,7 +852,7 @@ namespace MCPForUnity.Editor.Clients
             }
             catch (Exception ex)
             {
-                McpLog.Warn($"[Claude Code] CheckStatus exception: {ex.GetType().Name}: {ex.Message}");
+                McpLog.Warn($"[{DisplayName}] CheckStatus exception: {ex.GetType().Name}: {ex.Message}");
                 client.SetStatus(McpStatus.Error, ex.Message);
                 client.configuredTransport = Models.ConfiguredTransport.Unknown;
             }
@@ -895,7 +907,7 @@ namespace MCPForUnity.Editor.Clients
         {
             if (string.IsNullOrEmpty(claudePath))
             {
-                throw new InvalidOperationException("Claude CLI not found. Please install Claude Code first.");
+                throw new InvalidOperationException(CliNotFoundMessage);
             }
 
             string args;
@@ -926,10 +938,10 @@ namespace MCPForUnity.Editor.Clients
             // Now add the registration
             if (!ExecPath.TryRun(claudePath, args, projectDir, out var stdout, out var stderr, 15000, pathPrepend))
             {
-                throw new InvalidOperationException($"Failed to register with Claude Code:\n{stderr}\n{stdout}");
+                throw new InvalidOperationException($"Failed to register with {DisplayName}:\n{stderr}\n{stdout}");
             }
 
-            McpLog.Info($"Successfully registered with Claude Code using {(useHttpTransport ? "HTTP" : "stdio")} transport.");
+            McpLog.Info($"Successfully registered with {DisplayName} using {(useHttpTransport ? "HTTP" : "stdio")} transport.");
             client.SetStatus(McpStatus.Configured);
             client.configuredTransport = serverTransport;
         }
@@ -941,14 +953,14 @@ namespace MCPForUnity.Editor.Clients
         {
             if (string.IsNullOrEmpty(claudePath))
             {
-                throw new InvalidOperationException("Claude CLI not found. Please install Claude Code first.");
+                throw new InvalidOperationException(CliNotFoundMessage);
             }
 
             // Remove from ALL scopes to ensure complete cleanup (#664)
             McpLog.Info("Removing all UnityMCP registrations from all scopes...");
             RemoveFromAllScopes(claudePath, projectDir, pathPrepend);
 
-            McpLog.Info("MCP server successfully unregistered from Claude Code.");
+            McpLog.Info($"MCP server successfully unregistered from {DisplayName}.");
             client.SetStatus(McpStatus.NotConfigured);
             client.configuredTransport = Models.ConfiguredTransport.Unknown;
         }
@@ -959,7 +971,7 @@ namespace MCPForUnity.Editor.Clients
             string claudePath = ResolveCliPath();
             if (string.IsNullOrEmpty(claudePath))
             {
-                throw new InvalidOperationException("Claude CLI not found. Please install Claude Code first.");
+                throw new InvalidOperationException(CliNotFoundMessage);
             }
 
             bool useHttpTransport = EditorConfigurationCache.Instance.UseHttpTransport;
@@ -1028,10 +1040,10 @@ namespace MCPForUnity.Editor.Clients
             // Now add the registration with the current transport mode
             if (!ExecPath.TryRun(claudePath, args, projectDir, out var stdout, out var stderr, 15000, pathPrepend))
             {
-                throw new InvalidOperationException($"Failed to register with Claude Code:\n{stderr}\n{stdout}");
+                throw new InvalidOperationException($"Failed to register with {DisplayName}:\n{stderr}\n{stdout}");
             }
 
-            McpLog.Info($"Successfully registered with Claude Code using {(useHttpTransport ? "HTTP" : "stdio")} transport.");
+            McpLog.Info($"Successfully registered with {DisplayName} using {(useHttpTransport ? "HTTP" : "stdio")} transport.");
 
             // Set status to Configured immediately after successful registration
             // The UI will trigger an async verification check separately to avoid blocking
@@ -1046,7 +1058,7 @@ namespace MCPForUnity.Editor.Clients
 
             if (string.IsNullOrEmpty(claudePath))
             {
-                throw new InvalidOperationException("Claude CLI not found. Please install Claude Code first.");
+                throw new InvalidOperationException(CliNotFoundMessage);
             }
 
             string projectDir = GetClientProjectDir();
@@ -1064,7 +1076,7 @@ namespace MCPForUnity.Editor.Clients
             McpLog.Info("Removing all UnityMCP registrations from all scopes...");
             RemoveFromAllScopes(claudePath, projectDir, pathPrepend);
 
-            McpLog.Info("MCP server successfully unregistered from Claude Code.");
+            McpLog.Info($"MCP server successfully unregistered from {DisplayName}.");
             client.SetStatus(McpStatus.NotConfigured);
             client.configuredTransport = Models.ConfiguredTransport.Unknown;
         }
@@ -1084,7 +1096,7 @@ namespace MCPForUnity.Editor.Clients
                     string apiKey = EditorPrefs.GetString(EditorPrefKeys.ApiKey, string.Empty);
                     headerArg = !string.IsNullOrEmpty(apiKey) ? $" --header \"{AuthConstants.ApiKeyHeader}: {SanitizeShellHeaderValue(apiKey)}\"" : "";
                 }
-                return "# Register the MCP server with Claude Code:\n" +
+                return $"# Register the MCP server with {DisplayName}:\n" +
                        $"claude mcp add --scope local --transport http UnityMCP {httpUrl}{headerArg}\n\n" +
                        "# Unregister the MCP server (from all scopes to clean up any stale configs):\n" +
                        "claude mcp remove --scope local UnityMCP\n" +
@@ -1102,7 +1114,7 @@ namespace MCPForUnity.Editor.Clients
             string devFlags = AssetPathUtility.GetUvxDevFlags();
             string fromArgs = AssetPathUtility.GetBetaServerFromArgs(quoteFromPath: true);
 
-            return "# Register the MCP server with Claude Code:\n" +
+            return $"# Register the MCP server with {DisplayName}:\n" +
                    $"claude mcp add --scope local --transport stdio UnityMCP -- \"{uvxPath}\" {devFlags}{fromArgs} mcp-for-unity\n\n" +
                    "# Unregister the MCP server (from all scopes to clean up any stale configs):\n" +
                    "claude mcp remove --scope local UnityMCP\n" +
@@ -1114,9 +1126,9 @@ namespace MCPForUnity.Editor.Clients
 
         public override IList<string> GetInstallationSteps() => new List<string>
         {
-            "Ensure Claude CLI is installed",
-            "Use Configure to add UnityMCP (or run claude mcp add UnityMCP)",
-            "Restart Claude Code"
+            $"Ensure {CliName} CLI is installed",
+            $"Use Configure to add UnityMCP (or run claude mcp add UnityMCP)",
+            $"Restart {DisplayName}"
         };
 
         /// <summary>

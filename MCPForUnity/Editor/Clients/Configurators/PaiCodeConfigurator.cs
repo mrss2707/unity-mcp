@@ -24,9 +24,23 @@ namespace MCPForUnity.Editor.Clients.Configurators
 
         public override bool IsInstalled => MCPServiceLocator.Paths.IsPaiCodeCliDetected();
 
+        protected override string CliName => "PaiCode";
+
         internal override string ResolveCliPath()
         {
-            return MCPServiceLocator.Paths.GetPaiCodeCliPath();
+            // Try the full path resolution first (override then PATH discovery)
+            string resolved = MCPServiceLocator.Paths.GetPaiCodeCliPath();
+            if (!string.IsNullOrEmpty(resolved))
+                return resolved;
+
+            // When the binary isn't found by standard discovery but ~/.paicode.json
+            // exists, PaiCode is installed (e.g. via npm link).  Return the bare
+            // command name so the shell can resolve it via PATH.
+            string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (File.Exists(Path.Combine(homeDir, ".paicode.json")))
+                return "paicode";
+
+            return null;
         }
 
         public override string GetSkillInstallPath()

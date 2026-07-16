@@ -634,6 +634,12 @@ namespace MCPForUnity.Editor.Clients
         protected virtual string CliName => "Claude";
 
         /// <summary>
+        /// File name of the user-scope config file (e.g. ".claude.json" or ".paicode.json").
+        /// Override in subclasses that use a different config file.
+        /// </summary>
+        protected virtual string UserConfigFileName => ".claude.json";
+
+        /// <summary>
         /// Full "CLI not found" error message.
         /// </summary>
         private string CliNotFoundMessage =>
@@ -1137,7 +1143,7 @@ namespace MCPForUnity.Editor.Clients
         /// This ensures no stale or conflicting configurations remain across different scopes.
         /// Also handles legacy "unityMCP" naming convention.
         /// </summary>
-        private static void RemoveFromAllScopes(string claudePath, string projectDir, string pathPrepend)
+        private void RemoveFromAllScopes(string claudePath, string projectDir, string pathPrepend)
         {
             // Remove from all three scopes to prevent stale configs causing connection issues.
             // See GitHub issue #664 - conflicting configs at different scopes can cause
@@ -1165,12 +1171,12 @@ namespace MCPForUnity.Editor.Clients
         /// These are legacy entries that were created by older versions or manual commands
         /// that didn't use --scope. The scoped `claude mcp remove` commands don't clean these up.
         /// </summary>
-        private static void RemoveLegacyUserConfigEntries(string projectDir)
+        private void RemoveLegacyUserConfigEntries(string projectDir)
         {
             try
             {
                 string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                string configPath = Path.Combine(homeDir, ".claude.json");
+                string configPath = Path.Combine(homeDir, UserConfigFileName);
                 if (!File.Exists(configPath))
                     return;
 
@@ -1214,7 +1220,7 @@ namespace MCPForUnity.Editor.Clients
                     {
                         mcpServers.Remove(name);
                         modified = true;
-                        McpLog.Info($"Removed legacy '{name}' entry from ~/.claude.json for project '{project.Name}'");
+                        McpLog.Info($"Removed legacy '{name}' entry from ~/{UserConfigFileName} for project '{project.Name}'");
                     }
                 }
 
@@ -1225,7 +1231,7 @@ namespace MCPForUnity.Editor.Clients
             }
             catch (Exception ex)
             {
-                McpLog.Warn($"Failed to clean up legacy ~/.claude.json entries: {ex.Message}");
+                McpLog.Warn($"Failed to clean up legacy ~/{UserConfigFileName} entries: {ex.Message}");
             }
         }
 
@@ -1307,12 +1313,12 @@ namespace MCPForUnity.Editor.Clients
         }
 
         /// <summary>
-        /// Reads Claude Code configuration from both local-scope (.claude/mcp.json in the project)
-        /// and user-scope (~/.claude.json). Local scope takes precedence, matching Claude Code's
-        /// own config resolution order.
+        /// Reads CLI-based config from both local-scope (.claude/mcp.json in the project)
+        /// and user-scope (user config file). Local scope takes precedence, matching the
+        /// CLI's own config resolution order.
         /// This is much faster than running `claude mcp list` which does health checks on all servers.
         /// </summary>
-        private static (JObject serverConfig, string error) ReadClaudeCodeConfig(string projectDir)
+        private (JObject serverConfig, string error) ReadClaudeCodeConfig(string projectDir)
         {
             try
             {
@@ -1371,15 +1377,15 @@ namespace MCPForUnity.Editor.Clients
         }
 
         /// <summary>
-        /// Reads UnityMCP config from the user-scope file: ~/.claude.json (projects section).
+        /// Reads UnityMCP config from the user-scope config file (projects section).
         /// This handles legacy configurations and direct user-level entries.
         /// </summary>
-        private static (JObject serverConfig, string error) ReadUserScopeConfig(string projectDir)
+        private (JObject serverConfig, string error) ReadUserScopeConfig(string projectDir)
         {
             try
             {
                 string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                string configPath = Path.Combine(homeDir, ".claude.json");
+                string configPath = Path.Combine(homeDir, UserConfigFileName);
 
                 if (!File.Exists(configPath))
                     return (null, null);

@@ -26,6 +26,8 @@ namespace MCPForUnity.Editor.Clients.Configurators
 
         protected override string CliName => "PaiCode";
 
+        protected override string UserConfigFileName => ".paicode.json";
+
         internal override string ResolveCliPath()
         {
             // Try the full path resolution first (override then PATH discovery)

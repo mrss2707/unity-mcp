@@ -20,7 +20,7 @@ ALL_ACTIONS = [
 @mcp_for_unity_tool(
     description="Manage Cross-platform Optimization — quality settings, texture compression, sprite atlases, lightmaps, occlusion culling, build size analysis",
     group="core",
-    annotations=ToolAnnotations(title="Manage Optimization"),
+    annotations=ToolAnnotations(title="Manage Optimization", destructiveHint=True),
 )
 async def manage_optimization(
     ctx: Context,

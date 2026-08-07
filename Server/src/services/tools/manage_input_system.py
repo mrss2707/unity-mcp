@@ -42,7 +42,7 @@ ALL_ACTIONS = [
     ),
     annotations=ToolAnnotations(
         title="Manage Input System",
-        destructiveHint=False,
+        destructiveHint=True,
         readOnlyHint=False,
     ),
 )

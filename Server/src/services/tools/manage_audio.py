@@ -19,7 +19,7 @@ ALL_ACTIONS = [
 @mcp_for_unity_tool(
     description="Manage Unity Audio — create and configure AudioSources, Audio Mixers, mixer snapshots, and 3D spatial audio settings",
     group="core",
-    annotations=ToolAnnotations(title="Manage Audio"),
+    annotations=ToolAnnotations(title="Manage Audio", destructiveHint=True),
 )
 async def manage_audio(
     ctx: Context,

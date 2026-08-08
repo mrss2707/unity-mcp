@@ -77,7 +77,6 @@ async def manage_build(
     bundleVersionCode: Annotated[int | None, "Android bundle version code for configure_aab."] = None,
     keystorePath: Annotated[str | None, "Path to keystore for configure_aab (read from env/OS keychain only)."] = None,
     keyAlias: Annotated[str | None, "Key alias for configure_aab."] = None,
-    buildPath: Annotated[str | None, "Path to build report for get_build_report."] = None,
 ) -> dict[str, Any]:
     action_lower = action.lower()
     if action_lower not in ALL_ACTIONS:
@@ -121,7 +120,6 @@ async def manage_build(
         "bundleVersionCode": bundleVersionCode,
         "keystorePath": keystorePath,
         "keyAlias": keyAlias,
-        "buildPath": buildPath,
     }
 
     for key, val in param_map.items():

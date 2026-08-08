@@ -36,13 +36,11 @@ TRANSPORT_KEYS = {"action", "unity_instance", "client_id"}
 KNOWN_IGNORED = {
     # develop: v10 tool-coverage work
     "manage_addressables": {"buildPath", "loadPath", "schemaType", "targetPlatform"},
-    "manage_build": {"buildPath"},
     # pre-existing on main
     "find_gameobjects": {"cursor", "pageSize"},
     "manage_scene": {"sceneViewTarget"},
 }
 KNOWN_UNREACHABLE = {
-    "manage_build": {"platform"},        # C# configure_code_generation wants it; the tool's param is `target`
 }
 
 # ToolParams accessors plus the raw JObject indexer. The first string literal is always the key

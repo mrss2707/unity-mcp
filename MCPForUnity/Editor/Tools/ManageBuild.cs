@@ -140,26 +140,80 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "configure_aab":
                     {
-                        int versionCode = p.GetInt("bundleVersionCode") ?? 0;
+                        int? versionCode = p.GetInt("bundleVersionCode");
                         string keystorePath = p.Get("keystorePath");
                         string keyAlias = p.Get("keyAlias");
 
-                        PlayerSettings.Android.bundleVersionCode = versionCode;
-                        PlayerSettings.Android.buildApkPerCpuArchitecture = true;
+                        // Validate everything before writing anything: a rejected call must not
+                        // leave the project half-configured.
+                        bool signingConfigured = !string.IsNullOrEmpty(keystorePath);
+                        string keystorePass = null;
+                        string keyaliasPass = null;
 
-                        if (!string.IsNullOrEmpty(keystorePath))
+                        if (signingConfigured)
                         {
                             if (!System.IO.File.Exists(keystorePath))
                                 return new ErrorResponse("KEYSTORE_NOT_FOUND",
                                     $"Keystore not found at: {keystorePath}");
+                            if (string.IsNullOrEmpty(keyAlias))
+                                return new ErrorResponse("MISSING_PARAMETER",
+                                    "'keystorePath' also needs 'keyAlias'.");
+
+                            // Passwords come from the Editor's environment, never from tool
+                            // parameters: parameters cross the bridge as plaintext JSON and are
+                            // written to transport logs.
+                            keystorePass = Environment.GetEnvironmentVariable("UNITY_ANDROID_KEYSTORE_PASS");
+                            keyaliasPass = Environment.GetEnvironmentVariable("UNITY_ANDROID_KEYALIAS_PASS");
+                            if (string.IsNullOrEmpty(keystorePass) || string.IsNullOrEmpty(keyaliasPass))
+                                return new ErrorResponse("KEYSTORE_PASSWORD_MISSING",
+                                    "Set UNITY_ANDROID_KEYSTORE_PASS and UNITY_ANDROID_KEYALIAS_PASS in the "
+                                    + "Unity Editor's environment before configuring signing. Without them the "
+                                    + "build is not signed and gradle fails late, long after this call returns.");
                         }
-                        if (!string.IsNullOrEmpty(keyAlias))
+                        else if (!string.IsNullOrEmpty(keyAlias))
                         {
+                            return new ErrorResponse("MISSING_PARAMETER",
+                                "'keyAlias' is only meaningful together with 'keystorePath'.");
+                        }
+
+                        // The action is named for this and never used to set it.
+                        EditorUserBuildSettings.buildAppBundle = true;
+                        // Per-ABI APK splitting is mutually exclusive with an app bundle, which
+                        // carries every ABI in one artifact. It was being turned on.
+                        PlayerSettings.Android.buildApkPerCpuArchitecture = false;
+
+                        // Only when supplied: the old default of 0 silently reset the version code
+                        // of any real project that called this action without one.
+                        if (versionCode.HasValue)
+                            PlayerSettings.Android.bundleVersionCode = versionCode.Value;
+
+                        if (signingConfigured)
+                        {
+                            PlayerSettings.Android.useCustomKeystore = true;
+                            PlayerSettings.Android.keystoreName = keystorePath;
+                            PlayerSettings.Android.keystorePass = keystorePass;
                             PlayerSettings.Android.keyaliasName = keyAlias;
+                            PlayerSettings.Android.keyaliasPass = keyaliasPass;
                         }
 
                         return new SuccessResponse(
-                            $"Configured AAB: versionCode={versionCode}");
+                            "Configured AAB output"
+                            + (signingConfigured ? " with custom keystore signing." : "."),
+                            new
+                            {
+                                buildAppBundle = EditorUserBuildSettings.buildAppBundle,
+                                buildApkPerCpuArchitecture = PlayerSettings.Android.buildApkPerCpuArchitecture,
+                                bundleVersionCode = PlayerSettings.Android.bundleVersionCode,
+                                useCustomKeystore = PlayerSettings.Android.useCustomKeystore,
+                                keystoreName = PlayerSettings.Android.keystoreName,
+                                keyaliasName = PlayerSettings.Android.keyaliasName,
+                                signingConfigured,
+                                // PlayerSettings writes both passwords to ProjectSettings.asset in
+                                // plaintext; that file should not be committed once signing is set.
+                                warning = signingConfigured
+                                    ? "Keystore passwords are stored in ProjectSettings.asset in plaintext."
+                                    : null
+                            });
                     }
                     case "get_build_report":
                     {

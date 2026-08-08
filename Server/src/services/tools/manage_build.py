@@ -75,8 +75,8 @@ async def manage_build(
     compilerConfig: Annotated[Literal["Debug", "Release", "Master"] | None, "IL2CPP compiler configuration."] = None,
     preserveAssemblies: Annotated[list[str] | None, "Assemblies to preserve from stripping (generates link.xml)."] = None,
     bundleVersionCode: Annotated[int | None, "Android bundle version code for configure_aab."] = None,
-    keystorePath: Annotated[str | None, "Path to keystore for configure_aab (read from env/OS keychain only)."] = None,
-    keyAlias: Annotated[str | None, "Key alias for configure_aab."] = None,
+    keystorePath: Annotated[str | None, "Path to keystore for configure_aab. Passwords are NOT parameters — set UNITY_ANDROID_KEYSTORE_PASS and UNITY_ANDROID_KEYALIAS_PASS in the Unity Editor's environment."] = None,
+    keyAlias: Annotated[str | None, "Key alias for configure_aab. Requires keystorePath."] = None,
 ) -> dict[str, Any]:
     action_lower = action.lower()
     if action_lower not in ALL_ACTIONS:

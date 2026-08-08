@@ -77,6 +77,7 @@ async def manage_components(
     methodName: Annotated[Optional[str], "Method name for the listener callback."] = None,
     paramType: Annotated[Optional[Literal["int", "float", "string", "bool", "Object"]], "Parameter type for typed listener."] = None,
     paramValue: Annotated[Optional[str], "Parameter value for typed listener (as string, will be parsed by C#)."] = None,
+    paramObjectPath: Annotated[Optional[str], "Path to the GameObject passed as the argument when paramType is 'Object'."] = None,
     listenerIndex: Annotated[Optional[int], "Index of the persistent listener to remove."] = None,
 ) -> dict[str, Any]:
     """
@@ -139,6 +140,7 @@ async def manage_components(
             "methodName": methodName,
             "paramType": paramType,
             "paramValue": paramValue,
+            "paramObjectPath": paramObjectPath,
             "listenerIndex": listenerIndex,
         }
 

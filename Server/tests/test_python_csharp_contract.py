@@ -36,7 +36,6 @@ TRANSPORT_KEYS = {"action", "unity_instance", "client_id"}
 KNOWN_IGNORED = {
     # develop: v10 tool-coverage work
     "manage_addressables": {"buildPath", "loadPath", "schemaType", "targetPlatform"},
-    "manage_audio": {"groupId", "mixerName"},
     "manage_build": {"buildPath"},
     # pre-existing on main
     "find_gameobjects": {"cursor", "pageSize"},

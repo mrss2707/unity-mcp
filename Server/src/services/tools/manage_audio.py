@@ -38,10 +38,10 @@ async def manage_audio(
     maxDistance: Annotated[float | None, "3D sound max distance."] = None,
     rolloffMode: Annotated[Literal["Logarithmic", "Linear", "Custom"] | None, "Audio rolloff mode."] = None,
     dopplerLevel: Annotated[float | None, "Doppler effect level (0.0 to 5.0)."] = None,
-    mixerName: Annotated[str | None, "AudioMixer asset name."] = None,
+    mixerPath: Annotated[str | None, "Path to the AudioMixer asset (e.g. 'Assets/Audio/Main.mixer')."] = None,
     outputPath: Annotated[str | None, "Output path for new AudioMixer asset."] = None,
     paramName: Annotated[str | None, "Exposed parameter name."] = None,
-    groupId: Annotated[str | None, "Mixer group ID or path."] = None,
+    mixerGroup: Annotated[str | None, "Name of a group inside mixerPath to route the AudioSource through (create_source/set_source)."] = None,
     snapshotName: Annotated[str | None, "Snapshot name."] = None,
     fadeTime: Annotated[float | None, "Fade transition time in seconds."] = None,
 ) -> dict[str, Any]:
@@ -100,14 +100,14 @@ async def manage_audio(
         params_dict["dopplerLevel"] = dopplerLevel
 
     # AudioMixer parameters
-    if mixerName is not None:
-        params_dict["mixerName"] = mixerName
+    if mixerPath is not None:
+        params_dict["mixerPath"] = mixerPath
     if outputPath is not None:
         params_dict["outputPath"] = outputPath
     if paramName is not None:
         params_dict["paramName"] = paramName
-    if groupId is not None:
-        params_dict["groupId"] = groupId
+    if mixerGroup is not None:
+        params_dict["mixerGroup"] = mixerGroup
 
     # Snapshot parameters
     if snapshotName is not None:

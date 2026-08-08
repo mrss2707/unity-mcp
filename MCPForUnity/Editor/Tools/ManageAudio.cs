@@ -87,6 +87,39 @@ namespace MCPForUnity.Editor.Tools
             }
         }
 
+        /// <summary>
+        /// Routes an AudioSource through a group of the mixer at `mixerPath`. Returns null on
+        /// success, or an ErrorResponse describing why the routing could not be applied. A missing
+        /// `mixerGroup` parameter is a no-op, not an error.
+        /// </summary>
+        private static object ApplyMixerGroup(ToolParams p, AudioSource source)
+        {
+            string groupName = p.Get("mixerGroup");
+            if (string.IsNullOrEmpty(groupName))
+                return null;
+
+            string mixerPath = p.Get("mixerPath");
+            if (string.IsNullOrEmpty(mixerPath))
+                return new ErrorResponse("MISSING_PARAMETER",
+                    "'mixerGroup' also needs 'mixerPath' — the AudioMixer asset the group lives in.");
+
+            mixerPath = AssetPathUtility.SanitizeAssetPath(mixerPath);
+            if (mixerPath == null)
+                return new ErrorResponse("INVALID_PATH", "Invalid mixerPath: contains traversal sequences.");
+
+            var mixer = AssetDatabase.LoadAssetAtPath<UnityEngine.Audio.AudioMixer>(mixerPath);
+            if (mixer == null)
+                return new ErrorResponse("MIXER_NOT_FOUND", $"No AudioMixer found at '{mixerPath}'.");
+
+            var groups = mixer.FindMatchingGroups(groupName);
+            if (groups == null || groups.Length == 0)
+                return new ErrorResponse("MIXER_GROUP_NOT_FOUND",
+                    $"AudioMixer at '{mixerPath}' has no group matching '{groupName}'.");
+
+            source.outputAudioMixerGroup = groups[0];
+            return null;
+        }
+
         // ─────────────────────────────────────────────
         // 1. create_source
         // ─────────────────────────────────────────────
@@ -128,6 +161,10 @@ namespace MCPForUnity.Editor.Tools
                 if (playOnAwake.HasValue)
                     source.playOnAwake = playOnAwake.Value;
 
+                var mixerError = ApplyMixerGroup(p, source);
+                if (mixerError != null)
+                    return mixerError;
+
                 EditorUtility.SetDirty(go);
 
                 return new SuccessResponse(
@@ -138,7 +175,8 @@ namespace MCPForUnity.Editor.Tools
                         clip = source.clip != null ? source.clip.name : null,
                         volume = source.volume,
                         loop = source.loop,
-                        playOnAwake = source.playOnAwake
+                        playOnAwake = source.playOnAwake,
+                        mixerGroup = source.outputAudioMixerGroup != null ? source.outputAudioMixerGroup.name : null
                     });
             }
             catch (Exception ex)
@@ -198,6 +236,10 @@ namespace MCPForUnity.Editor.Tools
                 if (spatialBlend.HasValue)
                     source.spatialBlend = Mathf.Clamp01(spatialBlend.Value);
 
+                var mixerError = ApplyMixerGroup(p, source);
+                if (mixerError != null)
+                    return mixerError;
+
                 EditorUtility.SetDirty(go);
 
                 return new SuccessResponse(
@@ -210,7 +252,8 @@ namespace MCPForUnity.Editor.Tools
                         pitch = source.pitch,
                         loop = source.loop,
                         playOnAwake = source.playOnAwake,
-                        spatialBlend = source.spatialBlend
+                        spatialBlend = source.spatialBlend,
+                        mixerGroup = source.outputAudioMixerGroup != null ? source.outputAudioMixerGroup.name : null
                     });
             }
             catch (Exception ex)
@@ -367,13 +410,31 @@ namespace MCPForUnity.Editor.Tools
                     }
                 }
 
-                // Create AudioMixerController instance via reflection
-                var mixerInstance = Activator.CreateInstance(_mixerControllerType);
+                // AudioMixerController is a ScriptableObject, so Activator.CreateInstance produces an
+                // instance with no native object behind it and AssetDatabase.CreateAsset then writes a
+                // broken asset. Unity's own "Create > Audio Mixer" goes through
+                // AudioMixerController.CreateMixerControllerAtPath, which also seeds the master group
+                // and snapshot that make the mixer usable.
+                var createAtPath = _mixerControllerType.GetMethod(
+                    "CreateMixerControllerAtPath",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                    null, new[] { typeof(string) }, null);
 
-                // Create the asset
-                AssetDatabase.CreateAsset(mixerInstance as UnityEngine.Object, outputPath);
+                if (createAtPath == null)
+                    return new ErrorResponse("MIXER_API_INCOMPATIBLE",
+                        "AudioMixerController.CreateMixerControllerAtPath is unavailable on this Unity version; "
+                        + "create the mixer via Assets > Create > Audio Mixer and re-run with its path.");
+
+                createAtPath.Invoke(null, new object[] { outputPath });
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+                // The reflection call reports nothing, so confirm the asset really landed rather
+                // than assuming it did.
+                var created = AssetDatabase.LoadAssetAtPath<UnityEngine.Audio.AudioMixer>(outputPath);
+                if (created == null)
+                    return new ErrorResponse("CREATE_MIXER_FAILED",
+                        $"CreateMixerControllerAtPath ran but no AudioMixer could be loaded from '{outputPath}'.");
 
                 string guid = AssetDatabase.AssetPathToGUID(outputPath);
 

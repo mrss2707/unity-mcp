@@ -68,6 +68,38 @@ namespace MCPForUnity.Editor.Tools.Build
             return NamedBuildTarget.FromBuildTargetGroup(GetTargetGroup(target));
         }
 
+        /// <summary>
+        /// Unity's legacy per-platform settings name — the string keying
+        /// <see cref="UnityEditor.TextureImporter"/> overrides and
+        /// <c>QualitySettings.GetActiveQualityLevelsForPlatform</c>. It is its own vocabulary,
+        /// unrelated to <see cref="BuildTarget"/> names: all four standalone targets share one
+        /// "Standalone" entry, and iOS is spelled "iPhone". Returns null for targets that have
+        /// no such page.
+        /// </summary>
+        /// <remarks>
+        /// "iPhone" is accepted on every supported version; Unity 6 canonicalises it to "iOS"
+        /// internally, while 2022.3 does the reverse. Neither API rejects an unrecognised string —
+        /// the importer stores it as a dead override no build reads, and the quality query returns
+        /// every level as if no filter were asked for — so callers must resolve through this method.
+        /// </remarks>
+        public static string GetPlatformSettingsName(BuildTarget target)
+        {
+            switch (target)
+            {
+                case BuildTarget.StandaloneWindows:
+                case BuildTarget.StandaloneWindows64:
+                case BuildTarget.StandaloneOSX:
+                case BuildTarget.StandaloneLinux64:
+                    return "Standalone";
+                case BuildTarget.iOS: return "iPhone";
+                case BuildTarget.Android: return "Android";
+                case BuildTarget.WebGL: return "WebGL";
+                case BuildTarget.WSAPlayer: return "Windows Store Apps";
+                case BuildTarget.tvOS: return "tvOS";
+                default: return null;
+            }
+        }
+
         public static string TryResolveNamedBuildTarget(string name, out NamedBuildTarget namedTarget)
         {
             if (!TryResolveBuildTarget(name, out var buildTarget))

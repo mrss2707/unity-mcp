@@ -38,17 +38,12 @@ KNOWN_IGNORED = {
     "manage_addressables": {"buildPath", "loadPath", "schemaType", "targetPlatform"},
     "manage_audio": {"groupId", "mixerName"},
     "manage_build": {"buildPath"},
-    "manage_input_system": {
-        "assetName", "binding", "groups", "interactions",
-        "optionalDevices", "processors", "requiredDevices",
-    },
     # pre-existing on main
     "find_gameobjects": {"cursor", "pageSize"},
     "manage_scene": {"sceneViewTarget"},
 }
 KNOWN_UNREACHABLE = {
     "manage_build": {"platform"},        # C# configure_code_generation wants it; the tool's param is `target`
-    "manage_input_system": {"path"},     # C# reads `path`; Python sends `assetPath` (aliased at runtime for now)
 }
 
 # ToolParams accessors plus the raw JObject indexer. The first string literal is always the key

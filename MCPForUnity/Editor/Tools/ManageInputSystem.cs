@@ -29,7 +29,7 @@ namespace MCPForUnity.Editor.Tools
             {
                 if (!_packageAvailable.HasValue)
                 {
-                    _packageAvailable = UnityTypeResolver.ResolveComponent("InputActionAsset") != null;
+                    _packageAvailable = UnityTypeResolver.ResolveScriptableObject("InputActionAsset") != null;
                 }
                 return _packageAvailable.Value;
             }
@@ -121,7 +121,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object CreateAsset(ToolParams p)
         {
-            string path = p.Get("path");
+            string path = p.Get("assetPath");
             string mapName = p.Get("map_name") ?? p.Get("mapName");
             string actionName = p.Get("action_name") ?? p.Get("actionName");
             bool overwrite = p.GetBool("overwrite");
@@ -238,7 +238,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object GetAsset(ToolParams p)
         {
-            string path = p.Get("path");
+            string path = p.Get("assetPath");
             if (string.IsNullOrEmpty(path))
                 return new ErrorResponse("'path' parameter is required.");
 
@@ -292,7 +292,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object AddActionMap(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -332,7 +332,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object RemoveActionMap(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -424,7 +424,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object AddAction(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -475,7 +475,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object RemoveAction(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -566,7 +566,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object RenameAction(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -629,7 +629,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object AddControlScheme(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -654,10 +654,33 @@ namespace MCPForUnity.Editor.Tools
                 string.Equals(s["name"]?.ToString(), schemeName, StringComparison.Ordinal)))
                 return new ErrorResponse($"Control scheme '{schemeName}' already exists.");
 
+            // InputControlScheme has a single constructor: (string name,
+            // IEnumerable<DeviceRequirement> devices, string bindingGroup). A scheme with no device
+            // requirements never activates, so the devices are not optional in practice.
+            var requirementType = _controlSchemeType.GetNestedType("DeviceRequirement");
+            if (requirementType == null)
+                return new ErrorResponse("API_INCOMPATIBLE",
+                    "InputControlScheme.DeviceRequirement could not be resolved on this Input System version.");
+
+            var controlPathProp = requirementType.GetProperty("controlPath");
+            var isOptionalProp = requirementType.GetProperty("isOptional");
+            if (controlPathProp == null || !controlPathProp.CanWrite || isOptionalProp == null || !isOptionalProp.CanWrite)
+                return new ErrorResponse("API_INCOMPATIBLE",
+                    "InputControlScheme.DeviceRequirement does not expose writable controlPath/isOptional on this Input System version.");
+
+            string[] requiredDevices = p.GetStringArray("requiredDevices") ?? Array.Empty<string>();
+            string[] optionalDevices = p.GetStringArray("optionalDevices") ?? Array.Empty<string>();
+
+            var requirements = Array.CreateInstance(requirementType, requiredDevices.Length + optionalDevices.Length);
+            int slot = 0;
+            foreach (var device in requiredDevices)
+                requirements.SetValue(MakeRequirement(requirementType, controlPathProp, isOptionalProp, device, false), slot++);
+            foreach (var device in optionalDevices)
+                requirements.SetValue(MakeRequirement(requirementType, controlPathProp, isOptionalProp, device, true), slot++);
+
             try
             {
-                // Create InputControlScheme struct
-                var scheme = Activator.CreateInstance(_controlSchemeType, new object[] { schemeName, bindingGroup });
+                var scheme = Activator.CreateInstance(_controlSchemeType, new object[] { schemeName, requirements, bindingGroup });
 
                 // Add via AddControlScheme method on asset
                 var addMethod = _assetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
@@ -690,12 +713,26 @@ namespace MCPForUnity.Editor.Tools
 
                 return new SuccessResponse(
                     $"Added control scheme '{schemeName}'.",
-                    new { path, schemeName, bindingGroup });
+                    new { path, schemeName, bindingGroup, requiredDevices, optionalDevices });
             }
             catch (Exception ex)
             {
                 return new ErrorResponse("ADD_SCHEME_FAILED", $"Failed to add control scheme: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Builds a boxed InputControlScheme.DeviceRequirement. The type is a struct, so the boxed
+        /// instance is mutated through the property setters and stays boxed until it is placed in
+        /// the requirements array.
+        /// </summary>
+        private static object MakeRequirement(Type requirementType, PropertyInfo controlPathProp,
+            PropertyInfo isOptionalProp, string devicePath, bool isOptional)
+        {
+            object requirement = Activator.CreateInstance(requirementType);
+            controlPathProp.SetValue(requirement, devicePath);
+            isOptionalProp.SetValue(requirement, isOptional);
+            return requirement;
         }
 
         // ─────────────────────────────────────────────
@@ -704,7 +741,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object RemoveControlScheme(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -814,7 +851,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object AddBindings(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -833,11 +870,24 @@ namespace MCPForUnity.Editor.Tools
             string mapName = mapNameResult.Value;
             string actionName = actionNameResult.Value;
 
+            // Accept an array of control-path strings, an array of binding objects, or the
+            // singular `binding`. The Python tool declares list[str], so string entries are the
+            // common case; objects allow per-binding overrides.
             JToken bindingsToken = p.GetRaw("bindings");
-            if (bindingsToken == null || bindingsToken.Type != JTokenType.Array)
-                return new ErrorResponse("'bindings' parameter is required (array of binding objects).");
-
-            var bindingsArray = (JArray)bindingsToken;
+            JArray bindingsArray;
+            if (bindingsToken is JArray array)
+            {
+                bindingsArray = array;
+            }
+            else if (!string.IsNullOrEmpty(p.Get("binding")))
+            {
+                bindingsArray = new JArray { p.Get("binding") };
+            }
+            else
+            {
+                return new ErrorResponse("MISSING_PARAMETER",
+                    "'bindings' (array of control paths or binding objects) or 'binding' (single control path) is required.");
+            }
 
             var asset = LoadAsset(path);
             if (asset == null)
@@ -855,37 +905,74 @@ namespace MCPForUnity.Editor.Tools
             {
                 int added = 0;
                 var addedBindings = new JArray();
+                var skipped = new JArray();
+
+                // Tool-level defaults, applied to every binding that does not override them.
+                string defaultGroups = p.Get("groups");
+                string defaultInteractions = p.Get("interactions");
+                string defaultProcessors = p.Get("processors");
 
                 foreach (var bindingToken in bindingsArray)
                 {
-                    if (bindingToken is not JObject bindingObj)
-                        continue;
+                    string bPath, bGroup, bName, bInteractions, bProcessors;
 
-                    string bPath = bindingObj["path"]?.ToString() ?? "";
-                    string bGroup = bindingObj["groups"]?.ToString() ?? bindingObj["group"]?.ToString();
-                    string bName = bindingObj["name"]?.ToString();
-                    string bInteractions = bindingObj["interactions"]?.ToString();
-                    string bProcessors = bindingObj["processors"]?.ToString();
+                    if (bindingToken is JObject bindingObj)
+                    {
+                        bPath = bindingObj["path"]?.ToString();
+                        bGroup = bindingObj["groups"]?.ToString() ?? bindingObj["group"]?.ToString() ?? defaultGroups;
+                        bName = bindingObj["name"]?.ToString();
+                        bInteractions = bindingObj["interactions"]?.ToString() ?? defaultInteractions;
+                        bProcessors = bindingObj["processors"]?.ToString() ?? defaultProcessors;
+                    }
+                    else if (bindingToken.Type == JTokenType.String)
+                    {
+                        bPath = bindingToken.ToString();
+                        bGroup = defaultGroups;
+                        bName = null;
+                        bInteractions = defaultInteractions;
+                        bProcessors = defaultProcessors;
+                    }
+                    else
+                    {
+                        skipped.Add(new JObject { ["entry"] = bindingToken.ToString(), ["reason"] = "unsupported entry type" });
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(bPath))
+                    {
+                        skipped.Add(new JObject { ["entry"] = bindingToken.ToString(), ["reason"] = "empty control path" });
+                        continue;
+                    }
 
                     var error = AddBindingToAction(action, map, bPath, bGroup, bName, bInteractions, bProcessors);
-                    if (error == null)
+                    if (error != null)
                     {
-                        added++;
-                        addedBindings.Add(new JObject
-                        {
-                            ["path"] = bPath,
-                            ["groups"] = bGroup ?? "",
-                            ["name"] = bName ?? ""
-                        });
+                        skipped.Add(new JObject { ["entry"] = bPath, ["reason"] = error.ToString() });
+                        continue;
                     }
+
+                    added++;
+                    addedBindings.Add(new JObject
+                    {
+                        ["path"] = bPath,
+                        ["groups"] = bGroup ?? "",
+                        ["name"] = bName ?? "",
+                        ["interactions"] = bInteractions ?? "",
+                        ["processors"] = bProcessors ?? ""
+                    });
                 }
+
+                if (added == 0)
+                    return new ErrorResponse("NO_BINDINGS_ADDED",
+                        $"None of the {bindingsArray.Count} supplied binding(s) could be added to '{actionName}'.",
+                        new { path, mapName, actionName, skipped });
 
                 EditorUtility.SetDirty(asset);
                 AssetDatabase.SaveAssets();
 
                 return new SuccessResponse(
                     $"Added {added} binding(s) to action '{actionName}'.",
-                    new { path, mapName, actionName, added, bindings = addedBindings });
+                    new { path, mapName, actionName, added, bindings = addedBindings, skipped });
             }
             catch (Exception ex)
             {
@@ -899,7 +986,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object RemoveBindings(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 
@@ -1040,7 +1127,7 @@ namespace MCPForUnity.Editor.Tools
 
         private static object AddComposite(ToolParams p)
         {
-            var pathResult = p.GetRequired("path", "'path' parameter is required.");
+            var pathResult = p.GetRequired("assetPath", "'assetPath' parameter is required.");
             if (!pathResult.IsSuccess)
                 return new ErrorResponse(pathResult.ErrorMessage);
 

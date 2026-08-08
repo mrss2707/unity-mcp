@@ -95,6 +95,37 @@ flags it, correctly — that is a runtime alias, not a fixed contract. Renaming 
 
 ---
 
+## 3b. `manage_input_system` persistence model is wrong — BLOCKER
+
+Found while verifying the Phase-1 contract fixes. Bigger than everything else in this file and it
+blocks end-to-end verification of the whole tool.
+
+`.inputactions` is a **ScriptedImporter JSON** format — Unity's stock asset begins `{ "name": … }`.
+`create_asset` instead calls `ScriptableObject.CreateInstance` + `AssetDatabase.CreateAsset`, which
+writes a Unity **YAML** `MonoBehaviour`. `InputActionImporter` rejects it, so the asset imports as
+`DefaultAsset` with an `ImportLog`:
+
+```
+guid=ffa3bc… typed=NULL anyObj=DefaultAsset allCount=1 [ImportLog] importer=InputActionImporter
+```
+
+`create_asset` still returns success and a GUID. Every subsequent action then fails with
+`No InputActionAsset found at '…'`, which is why nothing downstream in this tool has ever been
+exercised.
+
+Second half of the same defect: every mutating action persists with
+`EditorUtility.SetDirty(asset)` + `AssetDatabase.SaveAssets()`. That does **not** write back through
+a ScriptedImporter, so even against a valid asset the edits would be discarded on reimport.
+
+Correct model (APIs verified live on 6000.5.3f1): `InputActionAsset.FromJson(string)` static,
+`LoadFromJson(string)` instance, `ToJson()` instance. Read the file → `FromJson` → mutate →
+`File.WriteAllText(path, asset.ToJson())` → `AssetDatabase.ImportAsset(path)`. Note `ToJson()` on a
+bare `CreateInstance` throws `ArgumentNullException` — the instance must be named and initialised first.
+
+This is an I/O-layer rewrite across all 12 actions, not a parameter fix. **Status: open, scope
+decision needed.** The Phase-1 parameter fixes below landed and compile clean on both Editors, but
+cannot be verified end-to-end until this is done.
+
 ## 4. Reporting success on failure
 
 The worst class for an agent: it believes the work is done.

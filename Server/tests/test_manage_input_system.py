@@ -59,14 +59,12 @@ async def test_create_asset(mock_unity):
     result = await manage_input_system(
         SimpleNamespace(),
         action="create_asset",
-        assetName="TestInput",
         assetPath="Assets/TestInput.inputactions",
     )
     assert result["success"] is True
     assert "message" in result
     assert mock_unity["tool_name"] == "manage_input_system"
     assert mock_unity["params"]["action"] == "create_asset"
-    assert mock_unity["params"]["assetName"] == "TestInput"
     assert mock_unity["params"]["assetPath"] == "Assets/TestInput.inputactions"
 
 

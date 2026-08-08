@@ -54,7 +54,6 @@ async def manage_input_system(
         "add_control_scheme", "remove_control_scheme",
         "add_bindings", "remove_bindings", "add_composite",
     ], "The operation to perform on the Input System asset."],
-    assetName: Annotated[str | None, "Name for the new InputActionAsset."] = None,
     assetPath: Annotated[str | None, "Path to the InputActionAsset (.inputactions)."] = None,
     mapName: Annotated[str | None, "Action map name."] = None,
     actionName: Annotated[str | None, "Action name within an action map."] = None,
@@ -90,8 +89,6 @@ async def manage_input_system(
     params_dict: dict[str, Any] = {"action": action_normalized}
 
     # Asset parameters
-    if assetName is not None:
-        params_dict["assetName"] = assetName
     if assetPath is not None:
         params_dict["assetPath"] = assetPath
 

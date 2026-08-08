@@ -59,7 +59,7 @@ All confirmed by Gate 1. Each one silently discards the parameter or makes the a
 | Tool | Parameters | Effect | Status |
 |---|---|---|---|
 | `manage_input_system` | C# reads `path`, Python sends `assetPath` | every action failed | **verified** (6000, 2022) |
-| `manage_input_system` | `assetName`, `binding`, `groups`, `interactions`, `processors`, `requiredDevices`, `optionalDevices` | 7 params discarded | fixed (blocked from end-to-end proof by §3b) |
+| `manage_input_system` | `assetName`, `binding`, `groups`, `interactions`, `processors`, `requiredDevices`, `optionalDevices` | 7 params discarded | **verified** (6000 positive, 2022 negative) |
 | `manage_audio` | C# reads `mixerPath`, Python sends `mixerName`; `groupId` unread | `expose_param`, `set_snapshot` always fail | **verified** (6000, 2022) |
 | `manage_addressables` | `schemaType`, `buildPath`, `loadPath`, `targetPlatform` unread; `labels` sent as list, read as string | **the whole tool was dead** — every reflected type name was wrong, see below | **verified** (2022 positive, 6000 negative) |
 | `manage_build` | C# `configure_code_generation` requires `platform`; the tool's parameter is `target` | action always fails | **verified** (6000, 2022) |
@@ -138,36 +138,59 @@ project-wide) → `list_groups` reporting `entryCount: 1` → `remove_asset` →
 
 ---
 
-## 3b. `manage_input_system` persistence model is wrong — BLOCKER
+## 3b. `manage_input_system` — the persistence model, and the API underneath it
 
-Found while verifying the Phase-1 contract fixes. Bigger than everything else in this file and it
-blocks end-to-end verification of the whole tool.
+**Resolved.** This was the largest single defect in the branch and it blocked end-to-end proof of
+everything else in the tool.
 
 `.inputactions` is a **ScriptedImporter JSON** format — Unity's stock asset begins `{ "name": … }`.
-`create_asset` instead calls `ScriptableObject.CreateInstance` + `AssetDatabase.CreateAsset`, which
-writes a Unity **YAML** `MonoBehaviour`. `InputActionImporter` rejects it, so the asset imports as
-`DefaultAsset` with an `ImportLog`:
+`create_asset` instead called `ScriptableObject.CreateInstance` + `AssetDatabase.CreateAsset`, which
+writes Unity **YAML**. `InputActionImporter` rejected it, so the asset imported as a `DefaultAsset`
+with an `ImportLog`:
 
 ```
 guid=ffa3bc… typed=NULL anyObj=DefaultAsset allCount=1 [ImportLog] importer=InputActionImporter
 ```
 
-`create_asset` still returns success and a GUID. Every subsequent action then fails with
-`No InputActionAsset found at '…'`, which is why nothing downstream in this tool has ever been
-exercised.
+`create_asset` still returned success and a GUID, and every later action then failed with
+`No InputActionAsset found at '…'`. The second half of the same defect: all twelve mutating actions
+persisted with `EditorUtility.SetDirty` + `AssetDatabase.SaveAssets`, which does not write back
+through a ScriptedImporter at all.
 
-Second half of the same defect: every mutating action persists with
-`EditorUtility.SetDirty(asset)` + `AssetDatabase.SaveAssets()`. That does **not** write back through
-a ScriptedImporter, so even against a valid asset the edits would be discarded on reimport.
+Both halves are fixed. New assets are written as JSON text and imported; every mutation now ends in
+`WriteAssetToDisk`, which rewrites the file from `ToJson()`, reimports, and confirms the result
+still loads as an `InputActionAsset`. Note `ToJson()` throws `ArgumentNullException` on a bare
+`CreateInstance`, so new assets start from a minimal JSON literal rather than from an instance.
 
-Correct model (APIs verified live on 6000.5.3f1): `InputActionAsset.FromJson(string)` static,
-`LoadFromJson(string)` instance, `ToJson()` instance. Read the file → `FromJson` → mutate →
-`File.WriteAllText(path, asset.ToJson())` → `AssetDatabase.ImportAsset(path)`. Note `ToJson()` on a
-bare `CreateInstance` throws `ArgumentNullException` — the instance must be named and initialised first.
+### What the blocker was hiding
 
-This is an I/O-layer rewrite across all 12 actions, not a parameter fix. **Status: open, scope
-decision needed.** The Phase-1 parameter fixes below landed and compile clean on both Editors, but
-cannot be verified end-to-end until this is done.
+With persistence working, the actions ran for the first time — and most of them were built on APIs
+that do not exist. `InputActionAsset`, `InputActionMap` and `InputAction` expose almost no mutation
+surface of their own; it all lives on `InputActionSetupExtensions` as static extension methods. The
+tool cached that type and **never called it once**, reaching instead for instance methods that were
+never there and falling back to private-field surgery.
+
+| Action | What it did | What it does now |
+|---|---|---|
+| `add_action_map` | Looked for `asset.AddActionMap(string)`, then set `map.name` — which has no setter | `InputActionSetupExtensions.AddActionMap` |
+| `add_action` | Looked for `map.AddAction(string)`, then rebuilt `m_Actions` by hand | `AddAction(map, name, type, …)` |
+| `add_bindings` | Appended to the map's private `m_Bindings` without fixing the action's binding range | `AddBinding(action, path, interactions, processors, groups)` |
+| `add_composite` | Invented a composite path of `*/{Vector2}`; the column holds the composite's *name*. Also required a `parts` array Python never sent, so the action was unreachable | `AddCompositeBinding` + `CompositeSyntax.With`; `parts` added to the schema as the natural `{"up": "<Keyboard>/w"}` map |
+| `rename_action` | Set `action.name` — no setter, and it would have orphaned every binding referencing the old name | `Rename(action, newName)`, which rewrites the references |
+| `remove_action` | Rebuilt `m_Actions`, leaving the action's bindings behind pointing at a name nothing answered to | `RemoveAction(action)` |
+| `remove_action_map` / `remove_control_scheme` | Private-array surgery | the matching extensions |
+| `remove_bindings` | Required `indices` or `paths`; the tool's vocabulary is `binding`/`bindings`, so this too was unreachable | accepts all three |
+
+Verified on 6000.5.3f1 — all twelve actions in sequence against one asset, with the file on disk
+read back after each: create → add map → add action → add bindings → add composite → add control
+scheme → rename → get → remove bindings → remove action → remove control scheme → remove map, twelve
+successes and no orphans. `groups`, `processors` and `interactions` all land in the JSON.
+2022.3.62f2 has no Input System installed and still returns `PACKAGE_MISSING`, which is the intended
+negative case.
+
+This also finally proves the Phase 1 parameter work: `requiredDevices`/`optionalDevices` produce a
+control scheme with real `DeviceRequirement` entries, and `add_bindings` accepts the plain string
+list Python sends.
 
 ## 4. Reporting success on failure
 

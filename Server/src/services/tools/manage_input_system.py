@@ -70,6 +70,8 @@ async def manage_input_system(
     oldName: Annotated[str | None, "Current action name (for rename)."] = None,
     newName: Annotated[str | None, "New action name (for rename)."] = None,
     compositeType: Annotated[Literal["1DAxis", "2DVector", "3DVector", "Dpad", "Stick"] | None, "Composite binding type."] = None,
+    compositeName: Annotated[str | None, "Name for the composite binding. Defaults to compositeType."] = None,
+    parts: Annotated[dict[str, str] | None, "Composite parts as part-name to binding path, e.g. {\"up\": \"<Keyboard>/w\", \"down\": \"<Keyboard>/s\"}. Required for add_composite."] = None,
 ) -> dict[str, Any]:
     """Unified Input System management tool."""
 
@@ -133,6 +135,10 @@ async def manage_input_system(
     # Composite parameters
     if compositeType is not None:
         params_dict["compositeType"] = compositeType
+    if compositeName is not None:
+        params_dict["compositeName"] = compositeName
+    if parts is not None:
+        params_dict["parts"] = parts
 
     # Remove any remaining None values
     params_dict = {k: v for k, v in params_dict.items() if v is not None}

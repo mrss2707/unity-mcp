@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using MCPForUnity.Editor.Helpers;
@@ -146,53 +147,36 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                var asset = ScriptableObject.CreateInstance(_assetType);
+                // Ensure the directory exists before writing the file.
+                string dir = System.IO.Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
+                {
+                    string[] parts = dir.Replace('\\', '/').Split('/');
+                    string current = parts[0];
+                    for (int i = 1; i < parts.Length; i++)
+                    {
+                        string next = current + "/" + parts[i];
+                        if (!AssetDatabase.IsValidFolder(next) && string.IsNullOrEmpty(AssetDatabase.CreateFolder(current, parts[i])))
+                            return new ErrorResponse("FOLDER_CREATE_FAILED",
+                                $"Could not create folder '{next}'.");
+                        current = next;
+                    }
+                }
+
+                // Write the file, not an asset. AssetDatabase.CreateAsset would emit Unity YAML,
+                // which InputActionImporter rejects — the old code produced a DefaultAsset with an
+                // ImportLog and still reported success and a GUID, which is why every later action
+                // failed with "No InputActionAsset found".
+                string assetName = System.IO.Path.GetFileNameWithoutExtension(path);
+                System.IO.File.WriteAllText(path, string.Format(EmptyAssetJsonFormat, assetName));
+                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+
+                var asset = LoadAsset(path);
                 if (asset == null)
-                    return new ErrorResponse("Failed to create InputActionAsset instance.");
+                    return new ErrorResponse("CREATE_FAILED",
+                        $"'{path}' was written but did not import as an InputActionAsset.");
 
-                string guid;
-                if (overwrite)
-                {
-                    var existing = AssetDatabase.LoadAssetAtPath<ScriptableObject>(path);
-                    if (existing != null)
-                    {
-                        EditorUtility.CopySerialized(asset, existing);
-                        UnityEngine.Object.DestroyImmediate(asset);
-                        asset = existing;
-                        EditorUtility.SetDirty(asset);
-                        AssetDatabase.SaveAssets();
-                        guid = AssetDatabase.AssetPathToGUID(path);
-                    }
-                    else
-                    {
-                        AssetDatabase.CreateAsset(asset, path);
-                        AssetDatabase.SaveAssets();
-                        guid = AssetDatabase.AssetPathToGUID(path);
-                    }
-                }
-                else
-                {
-                    // Ensure directory exists
-                    string dir = System.IO.Path.GetDirectoryName(path);
-                    if (!string.IsNullOrEmpty(dir) && !AssetDatabase.IsValidFolder(dir))
-                    {
-                        string[] parts = dir.Replace('\\', '/').Split('/');
-                        string current = parts[0];
-                        for (int i = 1; i < parts.Length; i++)
-                        {
-                            string next = current + "/" + parts[i];
-                            if (!AssetDatabase.IsValidFolder(next))
-                                AssetDatabase.CreateFolder(current, parts[i]);
-                            current = next;
-                        }
-                    }
-
-                    AssetDatabase.CreateAsset(asset, path);
-                    AssetDatabase.SaveAssets();
-                    guid = AssetDatabase.AssetPathToGUID(path);
-                }
-
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                string guid = AssetDatabase.AssetPathToGUID(path);
 
                 // Optionally add initial action map and action
                 if (!string.IsNullOrEmpty(mapName))
@@ -218,8 +202,8 @@ namespace MCPForUnity.Editor.Tools
                         }
                     }
 
-                    EditorUtility.SetDirty(asset);
-                    AssetDatabase.SaveAssets();
+                    var saveError = WriteAssetToDisk(asset, path);
+                    if (saveError != null) return saveError;
                 }
 
                 return new SuccessResponse(
@@ -318,8 +302,8 @@ namespace MCPForUnity.Editor.Tools
             if (error is ErrorResponse er)
                 return er;
 
-            EditorUtility.SetDirty(asset);
-            AssetDatabase.SaveAssets();
+            var saveError = WriteAssetToDisk(asset, path);
+            if (saveError != null) return saveError;
 
             return new SuccessResponse(
                 $"Added action map '{mapName}' to '{path}'.",
@@ -382,31 +366,16 @@ namespace MCPForUnity.Editor.Tools
                     return new ErrorResponse($"Action map with {identifier} not found.");
                 }
 
-                // Remove via RemoveActionMap method
-                var removeMethod = _assetType.GetMethod("RemoveActionMap", BindingFlags.Public | BindingFlags.Instance);
-                if (removeMethod != null)
-                {
-                    removeMethod.Invoke(asset, new[] { targetMap.Instance });
-                }
-                else
-                {
-                    // Fallback: direct array manipulation
-                    var mActionMapsField = _assetType.GetField("m_ActionMaps", BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (mActionMapsField != null)
-                    {
-                        var currentMaps = (Array)mActionMapsField.GetValue(asset);
-                        var newMaps = Array.CreateInstance(_mapType, currentMaps.Length - 1);
-                        for (int i = 0, j = 0; i < currentMaps.Length; i++)
-                        {
-                            if (i != targetIndex)
-                                newMaps.SetValue(currentMaps.GetValue(i), j++);
-                        }
-                        mActionMapsField.SetValue(asset, newMaps);
-                    }
-                }
+                // InputActionAsset has no instance RemoveActionMap either.
+                var removeMap = SetupMethod("RemoveActionMap", _assetType, _mapType);
+                if (removeMap == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionSetupExtensions.RemoveActionMap(asset, map) is not available.");
 
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                removeMap.Invoke(null, new[] { asset, targetMap.Instance });
+
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Removed action map '{targetMap.Name}' from '{path}'.",
@@ -461,8 +430,8 @@ namespace MCPForUnity.Editor.Tools
             if (error != null)
                 return new ErrorResponse("ADD_ACTION_FAILED", error);
 
-            EditorUtility.SetDirty(asset);
-            AssetDatabase.SaveAssets();
+            var saveError = WriteAssetToDisk(asset, path);
+            if (saveError != null) return saveError;
 
             return new SuccessResponse(
                 $"Added action '{actionName}' to map '{mapName}'.",
@@ -508,47 +477,19 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                // Use RemoveAction method on InputActionMap if available
-                var removeMethod = _mapType.GetMethod("RemoveAction", BindingFlags.Public | BindingFlags.Instance);
-                if (removeMethod != null)
-                {
-                    removeMethod.Invoke(map.Instance, new[] { action.Instance });
-                }
-                else
-                {
-                    // Fallback: direct array manipulation on m_Actions
-                    var mActionsField = _mapType.GetField("m_Actions", BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (mActionsField != null)
-                    {
-                        var currentActions = (Array)mActionsField.GetValue(map.Instance);
-                        var actionNameProp = _actionType.GetProperty("name");
-                        int removeIdx = -1;
-                        for (int i = 0; i < currentActions.Length; i++)
-                        {
-                            var a = currentActions.GetValue(i);
-                            var n = (string)actionNameProp.GetValue(a);
-                            if (n == actionName)
-                            {
-                                removeIdx = i;
-                                break;
-                            }
-                        }
+                // InputActionMap has no RemoveAction. The extension takes the action itself and
+                // also erases the bindings that referenced it — the private-array surgery this
+                // replaces dropped the action and left its bindings behind, pointing at a name
+                // nothing answered to.
+                var removeAction = SetupMethod("RemoveAction", _actionType);
+                if (removeAction == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionSetupExtensions.RemoveAction(action) is not available.");
 
-                        if (removeIdx >= 0)
-                        {
-                            var newActions = Array.CreateInstance(_actionType, currentActions.Length - 1);
-                            for (int i = 0, j = 0; i < currentActions.Length; i++)
-                            {
-                                if (i != removeIdx)
-                                    newActions.SetValue(currentActions.GetValue(i), j++);
-                            }
-                            mActionsField.SetValue(map.Instance, newActions);
-                        }
-                    }
-                }
+                removeAction.Invoke(null, new[] { action.Instance });
 
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Removed action '{actionName}' from map '{mapName}'.",
@@ -608,10 +549,16 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                var nameProp = _actionType.GetProperty("name");
-                nameProp.SetValue(action.Instance, newName);
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                // InputAction.name has no setter — renaming goes through
+                // InputActionSetupExtensions.Rename, which also rewrites the action reference on
+                // every binding that points at it.
+                var rename = SetupMethod("Rename", _actionType, typeof(string));
+                if (rename == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionSetupExtensions.Rename(action, string) is not available.");
+                rename.Invoke(null, new object[] { action.Instance, newName });
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Renamed action '{oldName}' to '{newName}' in map '{mapName}'.",
@@ -708,8 +655,8 @@ namespace MCPForUnity.Editor.Tools
                     }
                 }
 
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Added control scheme '{schemeName}'.",
@@ -759,81 +706,20 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                // Try RemoveControlScheme method
-                var removeMethod = _assetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == "RemoveControlScheme");
+                // RemoveControlScheme(asset, name) is an extension, not an instance method, and
+                // it takes the name directly — no need to locate the struct first.
+                var removeScheme = SetupMethod("RemoveControlScheme", _assetType, typeof(string));
+                if (removeScheme == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionSetupExtensions.RemoveControlScheme(asset, string) is not available.");
 
-                if (removeMethod != null)
-                {
-                    // Find the scheme first
-                    var schemesProp = _assetType.GetProperty("controlSchemes");
-                    var schemesObj = schemesProp.GetValue(asset);
-                    var schemesArray = ExtractArrayFromReadOnlyArray(schemesObj);
+                if (FindControlSchemeIndex(asset, schemeName) < 0)
+                    return new ErrorResponse("NOT_FOUND", $"Control scheme '{schemeName}' not found.");
 
-                    object schemeToRemove = null;
-                    var nameField = _controlSchemeType.GetProperty("name") ?? (MemberInfo)_controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
+                removeScheme.Invoke(null, new object[] { asset, schemeName });
 
-                    if (schemesArray != null)
-                    {
-                        for (int i = 0; i < schemesArray.Length; i++)
-                        {
-                            var s = schemesArray.GetValue(i);
-                            var n = nameField != null
-                                ? (string)((nameField is PropertyInfo pi ? pi.GetValue(s) : ((FieldInfo)nameField).GetValue(s)))
-                                : null;
-                            if (n == schemeName)
-                            {
-                                schemeToRemove = s;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (schemeToRemove == null)
-                        return new ErrorResponse($"Control scheme '{schemeName}' not found.");
-
-                    removeMethod.Invoke(asset, new[] { schemeToRemove });
-                }
-                else
-                {
-                    // Fallback: direct array manipulation
-                    var mControlSchemesField = _assetType.GetField("m_ControlSchemes", BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (mControlSchemesField == null)
-                        return new ErrorResponse("Cannot remove control scheme: no supported API found.");
-
-                    var current = (Array)mControlSchemesField.GetValue(asset);
-                    if (current == null)
-                        return new ErrorResponse("No control schemes found.");
-
-                    var nameProp = _controlSchemeType.GetProperty("name") ?? (MemberInfo)_controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
-                    int removeIdx = -1;
-                    for (int i = 0; i < current.Length; i++)
-                    {
-                        var s = current.GetValue(i);
-                        var n = nameProp is PropertyInfo pi
-                            ? (string)pi.GetValue(s)
-                            : (string)((FieldInfo)nameProp).GetValue(s);
-                        if (n == schemeName)
-                        {
-                            removeIdx = i;
-                            break;
-                        }
-                    }
-
-                    if (removeIdx < 0)
-                        return new ErrorResponse($"Control scheme '{schemeName}' not found.");
-
-                    var newArray = Array.CreateInstance(_controlSchemeType, current.Length - 1);
-                    for (int i = 0, j = 0; i < current.Length; i++)
-                    {
-                        if (i != removeIdx)
-                            newArray.SetValue(current.GetValue(i), j++);
-                    }
-                    mControlSchemesField.SetValue(asset, newArray);
-                }
-
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Removed control scheme '{schemeName}'.",
@@ -967,8 +853,8 @@ namespace MCPForUnity.Editor.Tools
                         $"None of the {bindingsArray.Count} supplied binding(s) could be added to '{actionName}'.",
                         new { path, mapName, actionName, skipped });
 
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Added {added} binding(s) to action '{actionName}'.",
@@ -1012,13 +898,18 @@ namespace MCPForUnity.Editor.Tools
                 return idx;
             }).Where(i => i >= 0).ToArray();
 
-            JToken pathsToken = p.GetRaw("paths");
-            string[] paths = null;
-            if (pathsToken is JArray pathsArray)
-                paths = pathsArray.Select(t => t.ToString()).ToArray();
+            // The tool's own vocabulary for binding paths is 'bindings' / 'binding', the same
+            // names add_bindings uses; 'paths' was a third spelling the Python side never sent,
+            // so this action could not be reached at all.
+            string[] paths = p.GetStringArray("bindings") ?? p.GetStringArray("paths");
+            string singleBinding = p.Get("binding");
+            if ((paths == null || paths.Length == 0) && !string.IsNullOrEmpty(singleBinding))
+                paths = new[] { singleBinding };
 
             if ((indices == null || indices.Length == 0) && (paths == null || paths.Length == 0))
-                return new ErrorResponse("Either 'indices' (array of integers) or 'paths' (array of binding paths) is required.");
+                return new ErrorResponse("MISSING_PARAMETER",
+                    "Removing bindings needs 'binding' (one path), 'bindings' (several) or "
+                    + "'indices' (positions within the action's bindings).");
 
             var asset = LoadAsset(path);
             if (asset == null)
@@ -1108,8 +999,8 @@ namespace MCPForUnity.Editor.Tools
                 }
                 mBindingsField.SetValue(map.Instance, newBindings);
 
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
                     $"Removed {toRemove.Count} binding(s) from action '{actionName}'.",
@@ -1151,11 +1042,35 @@ namespace MCPForUnity.Editor.Tools
                 return new ErrorResponse("'composite_type' parameter is required (e.g. '2DVector', '1DAxis', 'ButtonWithOneModifier').");
 
             string compositeName = p.Get("composite_name") ?? p.Get("compositeName");
-            JToken partsToken = p.GetRaw("parts");
-            if (partsToken == null || partsToken.Type != JTokenType.Array)
-                return new ErrorResponse("'parts' parameter is required (array of part binding objects with 'path' and 'name').");
 
-            var partsArray = (JArray)partsToken;
+            // 'parts' accepts the natural {"up": "<Keyboard>/w", …} map as well as the array of
+            // {name, path, groups} objects, because a composite part is exactly a name/path pair.
+            JToken partsToken = p.GetRaw("parts");
+            var parts = new List<(string Name, string Path, string Groups)>();
+            if (partsToken is JObject partsObject)
+            {
+                foreach (var entry in partsObject)
+                {
+                    if (!string.IsNullOrEmpty(entry.Key) && entry.Value?.Type == JTokenType.String)
+                        parts.Add((entry.Key, entry.Value.ToString(), null));
+                }
+            }
+            else if (partsToken is JArray partsArrayToken)
+            {
+                foreach (var partToken in partsArrayToken)
+                {
+                    if (partToken is not JObject partObj) continue;
+                    string partName = partObj["name"]?.ToString();
+                    string partPath = partObj["path"]?.ToString();
+                    if (!string.IsNullOrEmpty(partName) && !string.IsNullOrEmpty(partPath))
+                        parts.Add((partName, partPath, partObj["groups"]?.ToString()));
+                }
+            }
+
+            if (parts.Count == 0)
+                return new ErrorResponse("MISSING_PARAMETER",
+                    "'parts' is required: either {\"up\": \"<Keyboard>/w\", …} or "
+                    + "[{\"name\": \"up\", \"path\": \"<Keyboard>/w\"}, …].");
 
             var asset = LoadAsset(path);
             if (asset == null)
@@ -1171,50 +1086,53 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                // Get the composite path based on type
-                string compositePath = GetCompositePath(compositeType);
-                if (compositePath == null)
-                    return new ErrorResponse($"Unknown composite type: '{compositeType}'. Valid types: 2DVector, 1DAxis, ButtonWithOneModifier, ButtonWithTwoModifiers, Dpad.");
+                // AddCompositeBinding writes the composite header binding and returns a syntax
+                // object whose With(name, binding, groups) appends each part in the right place.
+                // The old code hand-rolled both, using a made-up composite path of "*/{Vector2}"
+                // — the composite column holds the composite's *name* ("2DVector"), not a control
+                // path — and appended parts as ordinary bindings.
+                var addComposite = SetupMethod("AddCompositeBinding", _actionType,
+                    typeof(string), typeof(string), typeof(string));
+                if (addComposite == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionSetupExtensions.AddCompositeBinding is not available.");
 
-                // Create the composite binding entry
-                var compositeBindingError = AddBindingToAction(action, map, compositePath, null, compositeName ?? compositeType, null, null, isComposite: true);
-                if (compositeBindingError != null)
-                    return new ErrorResponse("COMPOSITE_FAILED", $"Failed to add composite binding: {compositeBindingError}");
-
-                // Create part bindings
-                int partsAdded = 0;
-                var addedParts = new JArray();
-
-                foreach (var partToken in partsArray)
+                object syntax = addComposite.Invoke(null, new object[]
                 {
-                    if (partToken is not JObject partObj)
-                        continue;
+                    action.Instance, compositeName ?? compositeType,
+                    p.Get("interactions"), p.Get("processors")
+                });
+                if (syntax == null)
+                    return new ErrorResponse("COMPOSITE_FAILED",
+                        $"AddCompositeBinding('{compositeType}') returned nothing.");
 
-                    string partPath = partObj["path"]?.ToString();
-                    string partName = partObj["name"]?.ToString();
-                    string partGroups = partObj["groups"]?.ToString();
+                var with = syntax.GetType().GetMethod("With",
+                    new[] { typeof(string), typeof(string), typeof(string), typeof(string) });
+                if (with == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "CompositeSyntax.With(name, binding, groups, processors) is not available.");
 
-                    if (string.IsNullOrEmpty(partPath) || string.IsNullOrEmpty(partName))
-                        continue;
-
-                    var partError = AddBindingToAction(action, map, partPath, partGroups, partName, null, null, isPartOfComposite: true);
-                    if (partError == null)
+                string defaultGroups = p.Get("groups");
+                var addedParts = new JArray();
+                foreach (var part in parts)
+                {
+                    string partGroups = part.Groups ?? defaultGroups;
+                    // With returns a new struct each time; the composite it appends to is tracked
+                    // by binding index inside the syntax value, so reassign rather than discard.
+                    syntax = with.Invoke(syntax, new object[] { part.Name, part.Path, partGroups, null });
+                    addedParts.Add(new JObject
                     {
-                        partsAdded++;
-                        addedParts.Add(new JObject
-                        {
-                            ["name"] = partName,
-                            ["path"] = partPath,
-                            ["groups"] = partGroups ?? ""
-                        });
-                    }
+                        ["name"] = part.Name,
+                        ["path"] = part.Path,
+                        ["groups"] = partGroups ?? ""
+                    });
                 }
 
-                EditorUtility.SetDirty(asset);
-                AssetDatabase.SaveAssets();
+                var saveError = WriteAssetToDisk(asset, path);
+                if (saveError != null) return saveError;
 
                 return new SuccessResponse(
-                    $"Added composite '{compositeType}' with {partsAdded} part(s) to action '{actionName}'.",
+                    $"Added composite '{compositeType}' with {parts.Count} part(s) to action '{actionName}'.",
                     new
                     {
                         path,
@@ -1222,7 +1140,7 @@ namespace MCPForUnity.Editor.Tools
                         actionName,
                         compositeType,
                         compositeName = compositeName ?? compositeType,
-                        partsAdded,
+                        partsAdded = parts.Count,
                         parts = addedParts
                     });
             }
@@ -1237,6 +1155,28 @@ namespace MCPForUnity.Editor.Tools
         // ─────────────────────────────────────────────
 
         /// <summary>
+        /// Index of a control scheme by name, or -1. Used to tell "removed" from "was never there".
+        /// </summary>
+        private static int FindControlSchemeIndex(ScriptableObject asset, string schemeName)
+        {
+            var schemesObj = _assetType.GetProperty("controlSchemes")?.GetValue(asset);
+            var schemes = ExtractArrayFromReadOnlyArray(schemesObj);
+            if (schemes == null) return -1;
+
+            var nameMember = _controlSchemeType.GetProperty("name")
+                ?? (MemberInfo)_controlSchemeType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
+            for (int i = 0; i < schemes.Length; i++)
+            {
+                var scheme = schemes.GetValue(i);
+                string name = nameMember is PropertyInfo pi
+                    ? (string)pi.GetValue(scheme)
+                    : (string)((FieldInfo)nameMember)?.GetValue(scheme);
+                if (name == schemeName) return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
         /// Loads an InputActionAsset at the given path via AssetDatabase.
         /// </summary>
         private static ScriptableObject LoadAsset(string path)
@@ -1245,6 +1185,57 @@ namespace MCPForUnity.Editor.Tools
             if (obj != null && _assetType.IsInstanceOfType(obj))
                 return obj;
             return null;
+        }
+
+        /// <summary>
+        /// The smallest text InputActionImporter accepts. A fresh
+        /// <c>ScriptableObject.CreateInstance&lt;InputActionAsset&gt;()</c> cannot be serialised at
+        /// all — its map array is null and <c>ToJson()</c> throws ArgumentNullException — so new
+        /// assets start from this rather than from an instance.
+        /// </summary>
+        private const string EmptyAssetJsonFormat =
+            "{{\n    \"name\": \"{0}\",\n    \"maps\": [],\n    \"controlSchemes\": []\n}}";
+
+        /// <summary>
+        /// Persists an InputActionAsset back to its file. Returns an ErrorResponse on failure,
+        /// or null on success.
+        /// </summary>
+        /// <remarks>
+        /// A `.inputactions` file is JSON read by InputActionImporter, a ScriptedImporter — it is
+        /// not a Unity YAML asset. EditorUtility.SetDirty + AssetDatabase.SaveAssets, which every
+        /// mutating action used to call, writes nothing back through a ScriptedImporter: the edit
+        /// lives only in the imported object and is discarded on the next reimport. The file has
+        /// to be rewritten from ToJson() and reimported.
+        /// </remarks>
+        private static object WriteAssetToDisk(ScriptableObject asset, string path)
+        {
+            try
+            {
+                var toJson = _assetType.GetMethod("ToJson",
+                    BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                if (toJson == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionAsset.ToJson() is not available in this Input System version.");
+
+                string json = (string)toJson.Invoke(asset, null);
+                if (string.IsNullOrEmpty(json))
+                    return new ErrorResponse("SERIALIZE_FAILED",
+                        $"InputActionAsset at '{path}' serialised to nothing; refusing to overwrite it.");
+
+                System.IO.File.WriteAllText(path, json);
+                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+
+                if (LoadAsset(path) == null)
+                    return new ErrorResponse("IMPORT_FAILED",
+                        $"'{path}' no longer imports as an InputActionAsset after saving.");
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                return new ErrorResponse("SAVE_FAILED",
+                    $"Failed to write InputActionAsset to '{path}': {(ex.InnerException ?? ex).Message}");
+            }
         }
 
         /// <summary>
@@ -1301,273 +1292,116 @@ namespace MCPForUnity.Editor.Tools
         /// <summary>
         /// Adds an action map to an InputActionAsset via reflection.
         /// </summary>
+        /// <summary>
+        /// Resolves a static method on InputActionSetupExtensions, the public API for editing
+        /// action assets. Everything this tool mutates lives there as an extension method —
+        /// InputActionAsset, InputActionMap and InputAction have no instance equivalents, which is
+        /// what the reflection ladders this replaced were fruitlessly searching for.
+        /// </summary>
+        private static MethodInfo SetupMethod(string name, params Type[] parameterTypes)
+        {
+            return _actionMapExtensionsType?.GetMethod(name,
+                BindingFlags.Public | BindingFlags.Static, null, parameterTypes, null);
+        }
+
         private static object AddActionMapToAsset(ScriptableObject asset, string mapName)
         {
             try
             {
-                var addMethod = _assetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == "AddActionMap" && m.GetParameters().Length == 1 &&
-                                         m.GetParameters()[0].ParameterType == typeof(string));
+                var addMap = SetupMethod("AddActionMap", _assetType, typeof(string));
+                if (addMap == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "InputActionSetupExtensions.AddActionMap(asset, string) is not available.");
 
-                if (addMethod != null)
-                {
-                    var result = addMethod.Invoke(asset, new object[] { mapName });
-                    return new SuccessResponse($"Added action map '{mapName}'.", new { mapName });
-                }
-
-                // Fallback: create InputActionMap via constructor and add via AddActionMap(InputActionMap) overload
-                var mapCtor = _mapType.GetConstructor(new[] { typeof(string) });
-                if (mapCtor != null)
-                {
-                    var newMap = mapCtor.Invoke(new object[] { mapName });
-
-                    // Set m_Asset back-reference
-                    var mAssetField = _mapType.GetField("m_Asset", BindingFlags.NonPublic | BindingFlags.Instance);
-                    mAssetField?.SetValue(newMap, asset);
-
-                    var addMapOverload = _assetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(m => m.Name == "AddActionMap" && m.GetParameters().Length == 1 &&
-                                             m.GetParameters()[0].ParameterType == _mapType);
-
-                    if (addMapOverload != null)
-                    {
-                        addMapOverload.Invoke(asset, new[] { newMap });
-                        return new SuccessResponse($"Added action map '{mapName}'.", new { mapName });
-                    }
-                }
-
-                // Last resort: direct m_ActionMaps array manipulation
-                var mActionMapsField = _assetType.GetField("m_ActionMaps", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (mActionMapsField == null)
-                    return new ErrorResponse("Cannot add action map: no supported API found.");
-
-                var mapCtorSimple = _mapType.GetConstructor(Type.EmptyTypes);
-                if (mapCtorSimple == null)
-                    return new ErrorResponse("Cannot add action map: no default constructor on InputActionMap.");
-
-                var newMapDirect = mapCtorSimple.Invoke(null);
-
-                var nameProp = _mapType.GetProperty("name");
-                nameProp?.SetValue(newMapDirect, mapName);
-
-                var mAssetFieldDirect = _mapType.GetField("m_Asset", BindingFlags.NonPublic | BindingFlags.Instance);
-                mAssetFieldDirect?.SetValue(newMapDirect, asset);
-
-                var currentMaps = (Array)mActionMapsField.GetValue(asset);
-                var newMapsArray = Array.CreateInstance(_mapType, (currentMaps?.Length ?? 0) + 1);
-                if (currentMaps != null)
-                {
-                    for (int i = 0; i < currentMaps.Length; i++)
-                        newMapsArray.SetValue(currentMaps.GetValue(i), i);
-                }
-                newMapsArray.SetValue(newMapDirect, newMapsArray.Length - 1);
-                mActionMapsField.SetValue(asset, newMapsArray);
-
+                addMap.Invoke(null, new object[] { asset, mapName });
                 return new SuccessResponse($"Added action map '{mapName}'.", new { mapName });
             }
             catch (Exception ex)
             {
-                return new ErrorResponse("ADD_MAP_FAILED", $"Failed to add action map: {ex.Message}");
+                return new ErrorResponse("ADD_MAP_FAILED",
+                    $"Failed to add action map: {(ex.InnerException ?? ex).Message}");
             }
         }
 
         /// <summary>
-        /// Adds an action to an action map via reflection.
+        /// Adds an action to an action map. Returns null on success, or an error message.
         /// </summary>
         private static string AddActionToMap(InputActionMapResolver map, string actionName, string actionType, string controlLayout)
         {
+            object actionTypeValue = Enum.ToObject(_actionTypeEnum, 0);
+            if (!string.IsNullOrEmpty(actionType))
+            {
+                try
+                {
+                    actionTypeValue = Enum.Parse(_actionTypeEnum, actionType, ignoreCase: true);
+                }
+                catch
+                {
+                    return $"Invalid action_type '{actionType}'. Valid values: Value, Button, PassThrough.";
+                }
+            }
+
             try
             {
-                // Determine the action type enum value
-                object actionTypeValue = null;
-                if (!string.IsNullOrEmpty(actionType))
+                // AddAction(map, name, type, binding, interactions, processors, groups, expectedControlLayout)
+                var addAction = SetupMethod("AddAction", _mapType, typeof(string), _actionTypeEnum,
+                    typeof(string), typeof(string), typeof(string), typeof(string), typeof(string));
+                if (addAction == null)
+                    return "InputActionSetupExtensions.AddAction is not available in this Input System version.";
+
+                addAction.Invoke(null, new object[]
                 {
-                    try
-                    {
-                        actionTypeValue = Enum.Parse(_actionTypeEnum, actionType, ignoreCase: true);
-                    }
-                    catch
-                    {
-                        return $"Invalid action_type '{actionType}'. Valid values: Value, Button, PassThrough.";
-                    }
-                }
-
-                // Try AddAction with type and layout parameters
-                if (actionTypeValue != null || !string.IsNullOrEmpty(controlLayout))
-                {
-                    var addActionFull = _mapType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(m => m.Name == "AddAction" && m.GetParameters().Length >= 2);
-
-                    if (addActionFull != null)
-                    {
-                        var parameters = addActionFull.GetParameters();
-                        var args = new object[parameters.Length];
-                        args[0] = actionName;
-
-                        for (int i = 1; i < parameters.Length; i++)
-                        {
-                            if (parameters[i].ParameterType == _actionTypeEnum)
-                                args[i] = actionTypeValue ?? Enum.GetValues(_actionTypeEnum).GetValue(0);
-                            else if (parameters[i].ParameterType == typeof(string))
-                                args[i] = controlLayout ?? (parameters[i].HasDefaultValue ? parameters[i].DefaultValue : null);
-                            else
-                                args[i] = parameters[i].HasDefaultValue ? parameters[i].DefaultValue : null;
-                        }
-
-                        addActionFull.Invoke(map.Instance, args);
-                        return null;
-                    }
-                }
-
-                // Try simple AddAction(name)
-                var addActionSimple = _mapType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(m => m.Name == "AddAction" && m.GetParameters().Length == 1 &&
-                                         m.GetParameters()[0].ParameterType == typeof(string));
-
-                if (addActionSimple != null)
-                {
-                    var newAction = addActionSimple.Invoke(map.Instance, new object[] { actionName });
-
-                    // Set expectedControlLayout and type if provided
-                    if (!string.IsNullOrEmpty(controlLayout))
-                    {
-                        var ctrlLayoutProp = _actionType.GetProperty("expectedControlType");
-                        ctrlLayoutProp?.SetValue(newAction, controlLayout);
-                    }
-
-                    if (actionTypeValue != null)
-                    {
-                        var typeProp = _actionType.GetProperty("type");
-                        typeProp?.SetValue(newAction, actionTypeValue);
-                    }
-
-                    return null;
-                }
-
-                // Fallback: direct m_Actions array manipulation
-                var mActionsField = _mapType.GetField("m_Actions", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (mActionsField == null)
-                    return "Cannot add action: no supported API found.";
-
-                var actionCtor = _actionType.GetConstructor(new[] { typeof(string) }) ??
-                                 _actionType.GetConstructor(Type.EmptyTypes);
-                if (actionCtor == null)
-                    return "Cannot add action: no suitable constructor on InputAction.";
-
-                object newActionObj;
-                var actionNameProp = _actionType.GetProperty("name");
-
-                if (actionCtor.GetParameters().Length == 1)
-                {
-                    newActionObj = actionCtor.Invoke(new object[] { actionName });
-                }
-                else
-                {
-                    newActionObj = actionCtor.Invoke(null);
-                    actionNameProp?.SetValue(newActionObj, actionName);
-                }
-
-                if (actionTypeValue != null)
-                {
-                    var typeProp = _actionType.GetProperty("type");
-                    typeProp?.SetValue(newActionObj, actionTypeValue);
-                }
-
-                if (!string.IsNullOrEmpty(controlLayout))
-                {
-                    var ctrlLayoutProp = _actionType.GetProperty("expectedControlType");
-                    ctrlLayoutProp?.SetValue(newActionObj, controlLayout);
-                }
-
-                var currentActions = (Array)mActionsField.GetValue(map.Instance);
-                var newActionsArray = Array.CreateInstance(_actionType, (currentActions?.Length ?? 0) + 1);
-                if (currentActions != null)
-                {
-                    for (int i = 0; i < currentActions.Length; i++)
-                        newActionsArray.SetValue(currentActions.GetValue(i), i);
-                }
-                newActionsArray.SetValue(newActionObj, newActionsArray.Length - 1);
-                mActionsField.SetValue(map.Instance, newActionsArray);
-
+                    map.Instance, actionName, actionTypeValue, null, null, null, null,
+                    string.IsNullOrEmpty(controlLayout) ? null : controlLayout
+                });
                 return null;
             }
             catch (Exception ex)
             {
-                return ex.InnerException?.Message ?? ex.Message;
+                return (ex.InnerException ?? ex).Message;
             }
         }
 
         /// <summary>
-        /// Adds a single binding to an action within its map via reflection.
+        /// Adds a single binding to an action. Returns null on success, or an error message.
         /// </summary>
+        /// <remarks>
+        /// Goes through InputActionSetupExtensions.AddBinding, which appends to the owning map's
+        /// binding array and fixes up the action's binding range. The private m_Bindings surgery
+        /// this replaces did neither reliably.
+        /// </remarks>
         private static string AddBindingToAction(InputActionResolver action, InputActionMapResolver map,
             string path, string groups, string name, string interactions, string processors,
             bool isComposite = false, bool isPartOfComposite = false)
         {
             try
             {
-                var mBindingsField = _mapType.GetField("m_Bindings", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (mBindingsField == null)
-                    return "Cannot access binding storage on InputActionMap.";
+                // AddBinding(action, path, interactions, processors, groups)
+                var addBinding = SetupMethod("AddBinding", _actionType,
+                    typeof(string), typeof(string), typeof(string), typeof(string));
+                if (addBinding == null)
+                    return "InputActionSetupExtensions.AddBinding is not available in this Input System version.";
 
-                var currentBindings = (Array)mBindingsField.GetValue(map.Instance);
-                int currentLen = currentBindings?.Length ?? 0;
-
-                var newBindings = Array.CreateInstance(_bindingType, currentLen + 1);
-
-                // Copy existing bindings
-                if (currentBindings != null)
+                object syntax = addBinding.Invoke(null, new object[]
                 {
-                    for (int i = 0; i < currentLen; i++)
-                        newBindings.SetValue(currentBindings.GetValue(i), i);
+                    action.Instance, path,
+                    string.IsNullOrEmpty(interactions) ? null : interactions,
+                    string.IsNullOrEmpty(processors) ? null : processors,
+                    string.IsNullOrEmpty(groups) ? null : groups
+                });
+
+                if (!string.IsNullOrEmpty(name) && syntax != null)
+                {
+                    var withName = syntax.GetType().GetMethod("WithName", new[] { typeof(string) });
+                    withName?.Invoke(syntax, new object[] { name });
                 }
-
-                // Create new InputBinding
-                var binding = Activator.CreateInstance(_bindingType);
-
-                var pathProp = _bindingType.GetProperty("path");
-                var actionProp = _bindingType.GetProperty("action");
-                var groupsProp = _bindingType.GetProperty("groups");
-                var nameProp = _bindingType.GetProperty("name");
-                var interactionsProp = _bindingType.GetProperty("interactions");
-                var processorsProp = _bindingType.GetProperty("processors");
-                var isCompositeProp = _bindingType.GetProperty("isComposite");
-                var isPartOfCompositeProp = _bindingType.GetProperty("isPartOfComposite");
-
-                pathProp?.SetValue(binding, path);
-                actionProp?.SetValue(binding, action.Name);
-                groupsProp?.SetValue(binding, groups ?? "");
-                nameProp?.SetValue(binding, name ?? "");
-                interactionsProp?.SetValue(binding, interactions ?? "");
-                processorsProp?.SetValue(binding, processors ?? "");
-                isCompositeProp?.SetValue(binding, isComposite);
-                isPartOfCompositeProp?.SetValue(binding, isPartOfComposite);
-
-                newBindings.SetValue(binding, currentLen);
-                mBindingsField.SetValue(map.Instance, newBindings);
 
                 return null;
             }
             catch (Exception ex)
             {
-                return ex.InnerException?.Message ?? ex.Message;
+                return (ex.InnerException ?? ex).Message;
             }
-        }
-
-        /// <summary>
-        /// Gets the composite control path for a known composite type name.
-        /// </summary>
-        private static string GetCompositePath(string compositeType)
-        {
-            return compositeType.ToLowerInvariant() switch
-            {
-                "2dvector" => "*/{Vector2}",
-                "1daxis" => "*/{Axis}",
-                "buttonwithonemodifier" => "*/{ButtonWithOneModifier}",
-                "buttonwithtwomodifiers" => "*/{ButtonWithTwoModifiers}",
-                "dpad" => "*/{Dpad}",
-                _ => null
-            };
         }
 
         /// <summary>

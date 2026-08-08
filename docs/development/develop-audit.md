@@ -46,9 +46,9 @@ A corollary the campaign kept re-learning: **verify the reflection shape on a li
 writing the call, not after.** Constructor arity, nested types, property names, accepted string
 vocabularies — each was cheap to check with `execute_code` and each had been guessed wrong.
 
-Before adding any `#if UNITY_*_OR_NEWER`, verify the API actually differs — `execute_code` against a
-live Editor answers this in seconds. Then follow CLAUDE.md § *Unity API Compatibility Shims*: the
-shim belongs in `Runtime/Helpers/Unity*Compat.cs`, not at the call site.
+So before adding any `#if UNITY_*_OR_NEWER`, verify the API actually differs. Then follow
+CLAUDE.md § *Unity API Compatibility Shims*: the shim belongs in `Runtime/Helpers/Unity*Compat.cs`
+(or `Editor/Helpers/` for editor-only types), not at the call site.
 
 ---
 
@@ -61,7 +61,7 @@ All confirmed by Gate 1. Each one silently discards the parameter or makes the a
 | `manage_input_system` | C# reads `path`, Python sends `assetPath` | every action failed | **verified** (6000, 2022) |
 | `manage_input_system` | `assetName`, `binding`, `groups`, `interactions`, `processors`, `requiredDevices`, `optionalDevices` | 7 params discarded | fixed (blocked from end-to-end proof by §3b) |
 | `manage_audio` | C# reads `mixerPath`, Python sends `mixerName`; `groupId` unread | `expose_param`, `set_snapshot` always fail | **verified** (6000, 2022) |
-| `manage_addressables` | `schemaType`, `buildPath`, `loadPath`, `targetPlatform` unread; `labels` sent as list, read as string | `create_group` ignores all config | open |
+| `manage_addressables` | `schemaType`, `buildPath`, `loadPath`, `targetPlatform` unread; `labels` sent as list, read as string | **the whole tool was dead** — every reflected type name was wrong, see below | **verified** (2022 positive, 6000 negative) |
 | `manage_build` | C# `configure_code_generation` requires `platform`; the tool's parameter is `target` | action always fails | **verified** (6000, 2022) |
 | `manage_build` | `buildPath` now unread | dead parameter (left over from the `get_build_report` fix below) | **verified** (6000, 2022) |
 | `find_gameobjects` | `cursor`, `pageSize` unread | **pre-existing on `main`**, not a `develop` regression | open |
@@ -74,18 +74,39 @@ two rows pre-existing on `main`.
 
 ---
 
-### `manage_addressables` has no verification host
+### `manage_addressables` — verification host, and what it found
 
-Its four ignored parameters are still open, and they cannot be verified live yet.
-`com.unity.addressables` 2.3.16 — the version Unity resolves — **does not compile on Unity
-6000.5.3f1**: `AsyncOperationBase.cs:282` and `VirtualAssetBundle.cs:37` still call
-`Object.GetInstanceID()`, which 6000.5 raises as CS0619. Installing it broke the probe project's
-compile and dropped the bridge; the package was removed and the project recovered.
+`com.unity.addressables` 2.3.16 — the version Unity 6000.5.3f1 resolves — **does not compile there**:
+`AsyncOperationBase.cs:282` and `VirtualAssetBundle.cs:37` still call `Object.GetInstanceID()`, which
+6000.5 raises as CS0619. This is the same deprecation `Runtime/Helpers/UnityObjectIdCompat.cs` shims
+for our own code, but it is inside the package and cannot be patched from here. Installing it broke
+the probe project and dropped the bridge; it was removed and the project recovered.
 
-This is the same deprecation `Runtime/Helpers/UnityObjectIdCompat.cs` shims for our own code, but it
-is inside the package, so it cannot be patched from here. Remaining options: host Addressables on
-the 2022.3 project (the deprecation does not apply there), pin a newer Addressables that supports
-6000.5, or mark the rows CI-only.
+Addressables **1.21.21 on the 2022.3 project** works, so that is now the verification host — and the
+6000 project stays the permanent negative case (`PACKAGE_MISSING` must keep being returned there).
+Note `refresh_unity` does not re-resolve the manifest; `PackageManager.Client.Resolve()` does.
+
+With a host, the four ignored parameters turned out to be the least of it. **Every reflected type
+name in the tool was wrong** — the assembly is `Unity.Addressables.Editor`, not
+`Unity.AddressableAssets.Editor`, and settings/group/entry live under `…AddressableAssets.Settings`,
+not `…AddressableAssets`. `PackageAvailable` therefore returned false on every project ever, so the
+tool answered `PACKAGE_MISSING` unconditionally and none of its seven actions had ever run. Behind
+that:
+
+| Action | What was actually broken |
+|---|---|
+| `create_group` | Looked for a 5-parameter `CreateGroup`; the real one takes 6 (`params Type[]`). Always `API_INCOMPATIBLE`. Groups were also created with no schema, so they could not be built. |
+| `assign_asset` | Called `AddressableAssetGroup.CreateEntry`, which does not exist at any accessibility. The real API is `AddressableAssetSettings.CreateOrMoveEntry`. |
+| `remove_asset` | Called `AddressableAssetGroup.RemoveEntry`; the method is `RemoveAssetEntry`. |
+| `list_groups`, and the duplicate check | `group.entries` is `ICollection<T>`, cast to `IList` — always null. Every group reported `entryCount: 0`. |
+| `labels` | Read with `p.Get` while Python sends an array, and written by mutating `entry.labels`, which does not register the label project-wide. Now `settings.AddLabel` + `entry.SetLabel`. |
+| `buildPath` / `loadPath` | These name Addressables *profile variables* (`Local.BuildPath`), not filesystem paths, and the properties are read-only `ProfileValueReference`s written via `SetVariableByName`. |
+| `targetPlatform` | Deleted from the Python schema — groups have no per-group platform. |
+
+Verified end to end on 2022.3.62f2: `create_group` (BundledAssetGroupSchema, Remote.BuildPath /
+Remote.LoadPath) → `assign_asset` (address `probe/tex`, labels `ui`+`preload` registered
+project-wide) → `list_groups` reporting `entryCount: 1` → `remove_asset` → entry gone, `entryCount: 0`.
+`get_dependency_chain` also returns. `build_content` remains unexercised — it is the polling work in §6.
 
 ## 2. Version guards written from assumption
 

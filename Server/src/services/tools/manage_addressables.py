@@ -27,13 +27,12 @@ async def manage_addressables(
         "list_groups", "build_content", "get_dependency_chain",
     ], "The operation to perform."],
     groupName: Annotated[str | None, "Addressable group name."] = None,
-    schemaType: Annotated[str | None, "Schema type for the new group."] = None,
-    buildPath: Annotated[str | None, "Build path for the group."] = None,
-    loadPath: Annotated[str | None, "Load path for the group."] = None,
+    schemaType: Annotated[str | None, "Schema type for the new group, e.g. BundledAssetGroupSchema (default) or ContentUpdateGroupSchema."] = None,
+    buildPath: Annotated[str | None, "Addressables profile variable naming the group's build path, e.g. Local.BuildPath or Remote.BuildPath — not a filesystem path."] = None,
+    loadPath: Annotated[str | None, "Addressables profile variable naming the group's load path, e.g. Local.LoadPath or Remote.LoadPath — not a filesystem path."] = None,
     assetPath: Annotated[str | None, "Asset path to assign/remove."] = None,
     address: Annotated[str | None, "Addressable address for the asset."] = None,
     labels: Annotated[list[str] | None, "Labels for the addressable asset."] = None,
-    targetPlatform: Annotated[Literal["Android", "iOS", "StandaloneWindows64", "StandaloneOSX"] | None, "Target build platform."] = None,
 ) -> dict[str, Any]:
     """Unified Addressables management tool."""
 
@@ -73,8 +72,6 @@ async def manage_addressables(
         params_dict["address"] = address
     if labels is not None:
         params_dict["labels"] = labels
-    if targetPlatform is not None:
-        params_dict["targetPlatform"] = targetPlatform
 
     # Remove any remaining None values
     params_dict = {k: v for k, v in params_dict.items() if v is not None}

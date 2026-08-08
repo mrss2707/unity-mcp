@@ -34,8 +34,6 @@ TRANSPORT_KEYS = {"action", "unity_instance", "client_id"}
 # delete each entry as it is fixed. Tracked in docs/development/develop-audit.md.
 # Do not add to these lists to make a failure go away — a new entry means a new broken tool.
 KNOWN_IGNORED = {
-    # develop: v10 tool-coverage work
-    "manage_addressables": {"buildPath", "loadPath", "schemaType", "targetPlatform"},
     # pre-existing on main
     "find_gameobjects": {"cursor", "pageSize"},
     "manage_scene": {"sceneViewTarget"},

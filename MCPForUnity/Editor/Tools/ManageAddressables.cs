@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using MCPForUnity.Editor.Helpers;
@@ -28,9 +29,9 @@ namespace MCPForUnity.Editor.Tools
                 if (!_packageAvailable.HasValue)
                 {
                     _packageAvailable = Type.GetType(
-                        "UnityEditor.AddressableAssets." +
+                        "UnityEditor.AddressableAssets.Settings." +
                         "AddressableAssetSettings, " +
-                        "Unity.AddressableAssets.Editor") != null;
+                        "Unity.Addressables.Editor") != null;
                 }
                 return _packageAvailable.Value;
             }
@@ -46,18 +47,18 @@ namespace MCPForUnity.Editor.Tools
             try
             {
                 _settingsType = Type.GetType(
-                    "UnityEditor.AddressableAssets.AddressableAssetSettings, " +
-                    "Unity.AddressableAssets.Editor");
+                    "UnityEditor.AddressableAssets.Settings.AddressableAssetSettings, " +
+                    "Unity.Addressables.Editor");
                 _groupType = Type.GetType(
-                    "UnityEditor.AddressableAssets.AddressableAssetGroup, " +
-                    "Unity.AddressableAssets.Editor");
+                    "UnityEditor.AddressableAssets.Settings.AddressableAssetGroup, " +
+                    "Unity.Addressables.Editor");
                 _entryType = Type.GetType(
-                    "UnityEditor.AddressableAssets.AddressableAssetEntry, " +
-                    "Unity.AddressableAssets.Editor");
+                    "UnityEditor.AddressableAssets.Settings.AddressableAssetEntry, " +
+                    "Unity.Addressables.Editor");
                 _groupSchemaType = Type.GetType(
                     "UnityEditor.AddressableAssets.Settings." +
                     "AddressableAssetGroupSchema, " +
-                    "Unity.AddressableAssets.Editor");
+                    "Unity.Addressables.Editor");
             }
             catch
             {
@@ -125,7 +126,7 @@ namespace MCPForUnity.Editor.Tools
             var defaultObjectType = Type.GetType(
                 "UnityEditor.AddressableAssets." +
                 "AddressableAssetSettingsDefaultObject, " +
-                "Unity.AddressableAssets.Editor");
+                "Unity.Addressables.Editor");
             if (defaultObjectType != null)
             {
                 var settingsProp = defaultObjectType.GetProperty("Settings",
@@ -154,11 +155,12 @@ namespace MCPForUnity.Editor.Tools
             return null;
         }
 
-        private static IList GetGroupsList(object settings)
+        private static List<object> GetGroupsList(object settings)
         {
             var groupsProp = _settingsType.GetProperty("groups",
                 BindingFlags.Public | BindingFlags.Instance);
-            return groupsProp?.GetValue(settings) as IList;
+            var groups = groupsProp?.GetValue(settings) as IEnumerable;
+            return groups?.Cast<object>().ToList();
         }
 
         private static string GetGroupName(object group)
@@ -168,11 +170,21 @@ namespace MCPForUnity.Editor.Tools
             return (string)nameProp?.GetValue(group);
         }
 
-        private static IList GetEntriesList(object group)
+        /// <summary>
+        /// The group's entries. Returns null only when the property itself is missing.
+        /// </summary>
+        /// <remarks>
+        /// AddressableAssetGroup.entries is an ICollection&lt;AddressableAssetEntry&gt;, not an
+        /// IList. Casting it to IList — which this used to do — always yielded null, so every
+        /// caller behaved as though no group ever had entries: list_groups reported entryCount 0,
+        /// assign_asset's duplicate check never fired, and remove_asset never found anything.
+        /// </remarks>
+        private static List<object> GetEntriesList(object group)
         {
             var entriesProp = _groupType.GetProperty("Entries") ??
                               _groupType.GetProperty("entries");
-            return entriesProp?.GetValue(group) as IList;
+            var entries = entriesProp?.GetValue(group) as IEnumerable;
+            return entries?.Cast<object>().ToList();
         }
 
         private static string GetEntryGuid(object entry)
@@ -235,49 +247,160 @@ namespace MCPForUnity.Editor.Tools
                     return new ErrorResponse("GROUP_EXISTS",
                         $"Group '{groupName}' already exists.");
 
-                // Create an empty List<AddressableAssetGroupSchema> via reflection
+                // A group with no schema cannot be built at all, so default to
+                // BundledAssetGroupSchema — the schema the Addressables window adds.
+                string schemaName = p.Get("schemaType") ?? "BundledAssetGroupSchema";
+                if (!schemaName.Contains("."))
+                    schemaName = "UnityEditor.AddressableAssets.Settings.GroupSchemas." + schemaName;
+                var schemaType = Type.GetType(schemaName + ", Unity.Addressables.Editor");
+                if (schemaType == null || !_groupSchemaType.IsAssignableFrom(schemaType))
+                    return new ErrorResponse("UNKNOWN_SCHEMA_TYPE",
+                        $"'{p.Get("schemaType")}' is not an AddressableAssetGroupSchema. "
+                        + "Expected e.g. BundledAssetGroupSchema or ContentUpdateGroupSchema.");
+
+                // Validate profile variables before creating anything: an invalid one used to
+                // leave a half-configured group behind.
+                string buildPath = p.Get("buildPath");
+                string loadPath = p.Get("loadPath");
+                var profileVariables = GetProfileVariableNames(settings).ToList();
+                foreach (var requested in new[] { buildPath, loadPath })
+                {
+                    if (!string.IsNullOrEmpty(requested) && !profileVariables.Contains(requested))
+                        return new ErrorResponse("UNKNOWN_PROFILE_VARIABLE",
+                            $"'{requested}' is not a profile variable. Available: "
+                            + string.Join(", ", profileVariables) + ".");
+                }
+
+                // CreateGroup's last parameter is `params Type[] types` — six parameters, not
+                // five. The old lookup asked for exactly five and always came up empty, so this
+                // action returned API_INCOMPATIBLE on every project.
+                var createGroupMethod = _settingsType.GetMethods(
+                    BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault(m => m.Name == "CreateGroup"
+                        && m.GetParameters().Length == 6
+                        && m.GetParameters()[5].ParameterType == typeof(Type[]));
+
+                if (createGroupMethod == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        "Cannot find CreateGroup(string, bool, bool, bool, List<schema>, Type[]) "
+                        + "on AddressableAssetSettings.");
+
                 var schemaListType = typeof(System.Collections.Generic.List<>)
                     .MakeGenericType(_groupSchemaType);
                 var schemas = Activator.CreateInstance(schemaListType);
 
-                // Call CreateGroup(groupName, false, false, false, schemas)
-                var createGroupMethod = _settingsType.GetMethod("CreateGroup",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    null, new[] { typeof(string), typeof(bool), typeof(bool),
-                        typeof(bool), schemaListType }, null);
-
-                if (createGroupMethod == null)
-                {
-                    // Try with different signature (object param for schemas)
-                    createGroupMethod = _settingsType.GetMethods(
-                        BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(m => m.Name == "CreateGroup" &&
-                            m.GetParameters().Length == 5);
-                }
-
-                if (createGroupMethod == null)
-                    return new ErrorResponse("API_INCOMPATIBLE",
-                        "Cannot find CreateGroup method on AddressableAssetSettings.");
-
                 var group = createGroupMethod.Invoke(settings,
-                    new object[] { groupName, false, false, false, schemas });
+                    new object[] { groupName, false, false, false, schemas, new[] { schemaType } });
 
                 if (group == null)
                     return new ErrorResponse("CREATE_FAILED",
                         "CreateGroup returned null.");
 
+                object pathError = ApplyGroupPaths(settings, group, buildPath, loadPath);
+                if (pathError != null) return pathError;
+
                 SetSettingsDirty(settings);
                 AssetDatabase.SaveAssets();
 
+                var appliedSchemas = (IList)group.GetType()
+                    .GetProperty("Schemas", BindingFlags.Public | BindingFlags.Instance)
+                    ?.GetValue(group);
+
                 return new SuccessResponse(
                     $"Created Addressables group '{groupName}'.",
-                    new { groupName });
+                    new
+                    {
+                        groupName,
+                        schemas = appliedSchemas == null
+                            ? null
+                            : appliedSchemas.Cast<object>().Select(s => s.GetType().Name).ToList(),
+                        buildPath = ReadProfileReference(settings, group, "BuildPath"),
+                        loadPath = ReadProfileReference(settings, group, "LoadPath")
+                    });
             }
             catch (Exception ex)
             {
                 return new ErrorResponse("CREATE_GROUP_FAILED",
                     $"Failed to create group: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Points a group's BundledAssetGroupSchema at the named profile variables.
+        /// Returns an ErrorResponse on failure, or null when there was nothing to do.
+        /// </summary>
+        /// <remarks>
+        /// buildPath and loadPath name Addressables *profile variables* ("Local.BuildPath",
+        /// "Remote.LoadPath"), not filesystem paths — the literal path is whatever the active
+        /// profile maps that variable to. BuildPath and LoadPath are read-only
+        /// ProfileValueReference properties, so the write goes through SetVariableByName.
+        /// </remarks>
+        private static object ApplyGroupPaths(object settings, object group, string buildPath, string loadPath)
+        {
+            if (string.IsNullOrEmpty(buildPath) && string.IsNullOrEmpty(loadPath))
+                return null;
+
+            var bundledSchemaType = Type.GetType(
+                "UnityEditor.AddressableAssets.Settings.GroupSchemas.BundledAssetGroupSchema, "
+                + "Unity.Addressables.Editor");
+            if (bundledSchemaType == null)
+                return new ErrorResponse("API_INCOMPATIBLE",
+                    "BundledAssetGroupSchema is not available in this Addressables version.");
+
+            var getSchema = group.GetType().GetMethod("GetSchema", new[] { typeof(Type) });
+            var schema = getSchema?.Invoke(group, new object[] { bundledSchemaType });
+            if (schema == null)
+                return new ErrorResponse("SCHEMA_MISSING",
+                    "buildPath and loadPath need a BundledAssetGroupSchema on the group.");
+
+            foreach (var pair in new[] { ("BuildPath", buildPath), ("LoadPath", loadPath) })
+            {
+                if (string.IsNullOrEmpty(pair.Item2)) continue;
+
+                var reference = bundledSchemaType.GetProperty(pair.Item1,
+                    BindingFlags.Public | BindingFlags.Instance)?.GetValue(schema);
+                var setByName = reference?.GetType().GetMethod("SetVariableByName");
+                if (setByName == null)
+                    return new ErrorResponse("API_INCOMPATIBLE",
+                        $"Cannot set {pair.Item1} on this Addressables version.");
+
+                if (!(bool)setByName.Invoke(reference, new object[] { settings, pair.Item2 }))
+                    return new ErrorResponse("UNKNOWN_PROFILE_VARIABLE",
+                        $"'{pair.Item2}' is not a profile variable. Available: "
+                        + string.Join(", ", GetProfileVariableNames(settings)) + ".");
+            }
+
+            EditorUtility.SetDirty((UnityEngine.Object)schema);
+            return null;
+        }
+
+        private static string ReadProfileReference(object settings, object group, string propertyName)
+        {
+            var bundledSchemaType = Type.GetType(
+                "UnityEditor.AddressableAssets.Settings.GroupSchemas.BundledAssetGroupSchema, "
+                + "Unity.Addressables.Editor");
+            var schema = bundledSchemaType == null
+                ? null
+                : group.GetType().GetMethod("GetSchema", new[] { typeof(Type) })
+                    ?.Invoke(group, new object[] { bundledSchemaType });
+            if (schema == null) return null;
+
+            var reference = bundledSchemaType.GetProperty(propertyName,
+                BindingFlags.Public | BindingFlags.Instance)?.GetValue(schema);
+            return reference?.GetType().GetMethod("GetName", new[] { settings.GetType() })
+                ?.Invoke(reference, new[] { settings }) as string;
+        }
+
+        private static IEnumerable<string> GetProfileVariableNames(object settings)
+        {
+            var profileSettings = settings.GetType()
+                .GetProperty("profileSettings", BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(settings);
+            var names = profileSettings?.GetType().GetMethod("GetVariableNames")
+                ?.Invoke(profileSettings, null) as IEnumerable;
+            return names == null
+                ? Enumerable.Empty<string>()
+                : names.Cast<object>().Select(o => o?.ToString());
         }
 
         // ─────────────────────────────────────────────
@@ -301,7 +424,7 @@ namespace MCPForUnity.Editor.Tools
                     return new ErrorResponse("'group_name' parameter is required.");
 
                 string address = p.Get("address") ?? assetPath;
-                string labelsStr = p.Get("labels");
+                string[] labels = p.GetStringArray("labels");
 
                 var settings = GetSettings();
                 if (settings == null)
@@ -332,58 +455,74 @@ namespace MCPForUnity.Editor.Tools
                     }
                 }
 
-                // Create entry via reflection: AddressableAssetGroup.CreateEntry(guid, address, null, false)
-                var createEntryMethod = _groupType.GetMethod("CreateEntry",
+                // AddressableAssetGroup has no CreateEntry — not even a non-public one, verified by
+                // reflection on Addressables 1.21.21. Entries are created through the settings
+                // object, which is also what registers them with the group's entry map.
+                var createOrMove = _settingsType.GetMethod("CreateOrMoveEntry",
                     BindingFlags.Public | BindingFlags.Instance,
-                    null, new[] { typeof(string), typeof(string), typeof(object),
-                        typeof(bool) }, null);
+                    null, new[] { typeof(string), _groupType, typeof(bool), typeof(bool) }, null);
 
-                if (createEntryMethod == null)
-                {
-                    // Try alternate signature
-                    createEntryMethod = _groupType.GetMethods(
-                        BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(m => m.Name == "CreateEntry");
-                }
-
-                if (createEntryMethod == null)
+                if (createOrMove == null)
                     return new ErrorResponse("API_INCOMPATIBLE",
-                        "Cannot find CreateEntry method on AddressableAssetGroup.");
+                        "Cannot find AddressableAssetSettings.CreateOrMoveEntry(string, group, bool, bool).");
 
-                var entry = createEntryMethod.Invoke(group,
-                    new object[] { guid, address, null, false });
+                var entry = createOrMove.Invoke(settings,
+                    new object[] { guid, group, false, false });
 
                 if (entry == null)
                     return new ErrorResponse("CREATE_ENTRY_FAILED",
-                        "CreateEntry returned null.");
+                        "CreateOrMoveEntry returned null.");
 
-                // Set labels if provided
-                if (!string.IsNullOrEmpty(labelsStr))
+                // CreateOrMoveEntry defaults the address to the asset path.
+                var addressProp = _entryType.GetProperty("address",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (addressProp != null && addressProp.CanWrite)
+                    addressProp.SetValue(entry, address);
+
+                // Python sends labels as a JSON array; p.Get would have returned null for it,
+                // so labels were silently dropped. Mutating entry.labels directly is also not
+                // enough: a label the project has never seen has to be registered on the settings
+                // first or the entry shows an unknown label the Addressables window cannot filter.
+                var appliedLabels = new List<string>();
+                if (labels != null && labels.Length > 0)
                 {
-                    var labelsProp = _entryType.GetProperty("labels",
-                        BindingFlags.Public | BindingFlags.Instance);
-                    if (labelsProp != null)
+                    var addLabel = _settingsType.GetMethod("AddLabel",
+                        BindingFlags.Public | BindingFlags.Instance,
+                        null, new[] { typeof(string), typeof(bool) }, null);
+                    var setLabel = _entryType.GetMethod("SetLabel",
+                        BindingFlags.Public | BindingFlags.Instance,
+                        null, new[] { typeof(string), typeof(bool), typeof(bool), typeof(bool) }, null);
+                    if (addLabel == null || setLabel == null)
+                        return new ErrorResponse("API_INCOMPATIBLE",
+                            "AddressableAssetSettings.AddLabel / AddressableAssetEntry.SetLabel "
+                            + "are not available in this Addressables version.");
+
+                    foreach (var raw in labels)
                     {
-                        var currentLabels = labelsProp.GetValue(entry) as IList;
-                        if (currentLabels != null)
-                        {
-                            foreach (var label in labelsStr.Split(','))
-                            {
-                                var trimmed = label.Trim();
-                                if (!string.IsNullOrEmpty(trimmed))
-                                    currentLabels.Add(trimmed);
-                            }
-                        }
+                        var label = raw?.Trim();
+                        if (string.IsNullOrEmpty(label)) continue;
+                        addLabel.Invoke(settings, new object[] { label, true });
+                        setLabel.Invoke(entry, new object[] { label, true, true, true });
+                        appliedLabels.Add(label);
                     }
                 }
 
                 SetSettingsDirty(settings);
                 AssetDatabase.SaveAssets();
 
+                var entryLabels = _entryType.GetProperty("labels",
+                    BindingFlags.Public | BindingFlags.Instance)?.GetValue(entry) as IEnumerable;
+                var readBack = entryLabels?.Cast<object>().Select(o => o?.ToString()).ToList();
+                var missing = appliedLabels.Where(l => readBack == null || !readBack.Contains(l)).ToList();
+                if (missing.Count > 0)
+                    return new ErrorResponse("LABELS_NOT_APPLIED",
+                        $"Entry created, but {missing.Count} label(s) did not stick: {string.Join(", ", missing)}.",
+                        new { assetPath, groupName, address, guid, labels = readBack });
+
                 return new SuccessResponse(
                     $"Assigned asset '{assetPath}' to group '{groupName}' " +
                     $"with address '{address}'.",
-                    new { assetPath, groupName, address, guid });
+                    new { assetPath, groupName, address, guid, labels = readBack });
             }
             catch (Exception ex)
             {
@@ -475,28 +614,29 @@ namespace MCPForUnity.Editor.Tools
                     return new ErrorResponse("ENTRY_NOT_FOUND",
                         "No addressable entry found matching the given criteria.");
 
-                // Remove entry from group via reflection
-                var removeEntryMethod = _groupType.GetMethod("RemoveEntry",
+                // There is no AddressableAssetGroup.RemoveEntry — the method is called
+                // RemoveAssetEntry, and the settings-level overload keyed by GUID is the one that
+                // also updates the settings' own bookkeeping.
+                var removeEntryMethod = _settingsType.GetMethod("RemoveAssetEntry",
                     BindingFlags.Public | BindingFlags.Instance,
-                    null, new[] { _entryType }, null);
-
-                if (removeEntryMethod == null)
-                {
-                    // Try RemoveEntry with object parameter
-                    removeEntryMethod = _groupType.GetMethods(
-                        BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(m => m.Name == "RemoveEntry" &&
-                            m.GetParameters().Length == 1);
-                }
+                    null, new[] { typeof(string), typeof(bool) }, null);
 
                 if (removeEntryMethod == null)
                     return new ErrorResponse("API_INCOMPATIBLE",
-                        "Cannot find RemoveEntry method on AddressableAssetGroup.");
+                        "Cannot find AddressableAssetSettings.RemoveAssetEntry(string, bool).");
 
-                removeEntryMethod.Invoke(targetGroup, new[] { targetEntry });
+                if (!(bool)removeEntryMethod.Invoke(settings, new object[] { foundGuid, true }))
+                    return new ErrorResponse("REMOVE_FAILED",
+                        $"Addressables declined to remove '{foundAddress}'.");
 
                 SetSettingsDirty(settings);
                 AssetDatabase.SaveAssets();
+
+                var findEntry = _settingsType.GetMethod("FindAssetEntry",
+                    BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null);
+                if (findEntry?.Invoke(settings, new object[] { foundGuid }) != null)
+                    return new ErrorResponse("REMOVE_FAILED",
+                        $"Entry for '{foundAddress}' is still present after removal.");
 
                 return new SuccessResponse(
                     $"Removed asset '{foundAddress}' from addressables.",
@@ -539,7 +679,7 @@ namespace MCPForUnity.Editor.Tools
                                           _groupType.GetProperty("schemas");
                         if (schemasProp != null)
                         {
-                            var schemas = schemasProp.GetValue(group) as IList;
+                            var schemas = schemasProp.GetValue(group) as IEnumerable;
                             if (schemas != null)
                             {
                                 foreach (var schema in schemas)
@@ -604,7 +744,7 @@ namespace MCPForUnity.Editor.Tools
                     var contentOptionsType = Type.GetType(
                         "UnityEditor.AddressableAssets.Build." +
                         "BuildPlayerContentOptions, " +
-                        "Unity.AddressableAssets.Editor");
+                        "Unity.Addressables.Editor");
                     if (contentOptionsType != null)
                     {
                         buildMethod = _settingsType.GetMethod("BuildPlayerContent",

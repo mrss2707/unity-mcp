@@ -64,6 +64,18 @@ namespace MCPForUnity.Editor.Helpers
             Error = messageOrCode;
             Data = data;
         }
+
+        /// <summary>
+        /// Machine-readable code plus a human-readable message. Overload resolution prefers this
+        /// over <c>(string, object)</c> whenever the second argument is a string, which is what
+        /// the many existing <c>new ErrorResponse("NOT_FOUND", $"...")</c> call sites already meant.
+        /// </summary>
+        public ErrorResponse(string code, string message, object data = null)
+        {
+            Code = code;
+            Error = message;
+            Data = data;
+        }
     }
 
     public sealed class PendingResponse : IMcpResponse

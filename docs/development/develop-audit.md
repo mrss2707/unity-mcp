@@ -68,9 +68,8 @@ All confirmed by Gate 1. Each one silently discards the parameter or makes the a
 | `manage_scene` | `sceneViewTarget` unread | **pre-existing on `main`** | open |
 
 The runtime `path` alias in `HandleCommand` has been deleted; the 14 C# reads are now `assetPath`.
-`KNOWN_UNREACHABLE` is empty — no parameter C# requires is unreachable from Python. The only
-remaining `KNOWN_IGNORED` entries are `manage_addressables` (no verification host, below) and the
-two rows pre-existing on `main`.
+Both allowlists are now empty of `develop` work: `KNOWN_UNREACHABLE` holds nothing at all, and
+`KNOWN_IGNORED` holds only the two rows that predate this branch on `main`.
 
 ---
 

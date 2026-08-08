@@ -169,21 +169,12 @@ namespace MCPForUnity.Editor.Tools
                             return new ErrorResponse("NO_BUILD_REPORT",
                                 "No build report found. Run manage_build(action='build') first.");
 
-#if UNITY_2022_1_OR_NEWER
-                        var buildFiles = report.GetFiles()?.Select(f => new
+                        var buildFiles = BuildReportCompat.GetFiles(report)?.Select(f => new
                         {
-                            path = f.path,
-                            size = f.size,
-                            role = f.role
+                            path = f.Path,
+                            size = f.Size,
+                            role = f.Role
                         }).ToList();
-#else
-                        var buildFiles = report.files?.Select(f => new
-                        {
-                            path = f.path,
-                            size = f.size,
-                            role = f.role
-                        }).ToList();
-#endif
 
                         return new SuccessResponse("Build report", new
                         {

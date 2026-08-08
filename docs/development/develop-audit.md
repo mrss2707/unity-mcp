@@ -33,9 +33,18 @@ requires a server restart; editing C# does not.
 
 ## The governing principle
 
-Every version-guard bug found so far was fixed by **deleting the guard**, not by adding another one.
-In all four cases the `#if` was written from an assumption about an API rather than from checking it,
-and the unguarded call was already correct across the whole 2021.3 → 6.x range.
+Almost every version-guard bug found so far was fixed by **deleting the guard**, not by adding
+another one. The `#if` was written from an assumption about an API rather than from checking it, and
+the unguarded call was already correct across the whole 2021.3 → 6.x range. Seven of nine guards
+went this way, including the three `UNITY_2022_2_OR_NEWER` brackets in `ManageComponents` whose
+`#else` branches called `UnityEventTools` methods that exist in no Unity version.
+
+Two guards survived, both genuine: `globalTextureMipmapLimit` (a real rename, shimmed) and
+`BuildReport.GetFiles()` (a real 2022.1 boundary, routed through one helper).
+
+A corollary the campaign kept re-learning: **verify the reflection shape on a live Editor before
+writing the call, not after.** Constructor arity, nested types, property names, accepted string
+vocabularies — each was cheap to check with `execute_code` and each had been guessed wrong.
 
 Before adding any `#if UNITY_*_OR_NEWER`, verify the API actually differs — `execute_code` against a
 live Editor answers this in seconds. Then follow CLAUDE.md § *Unity API Compatibility Shims*: the
@@ -50,17 +59,18 @@ All confirmed by Gate 1. Each one silently discards the parameter or makes the a
 | Tool | Parameters | Effect | Status |
 |---|---|---|---|
 | `manage_input_system` | C# reads `path`, Python sends `assetPath` | every action failed | **verified** (6000, 2022) |
-| `manage_input_system` | `assetName`, `binding`, `groups`, `interactions`, `processors`, `requiredDevices`, `optionalDevices` | 7 params discarded | open |
-| `manage_audio` | C# reads `mixerPath`, Python sends `mixerName`; `groupId` unread | `expose_param`, `set_snapshot` always fail | open |
+| `manage_input_system` | `assetName`, `binding`, `groups`, `interactions`, `processors`, `requiredDevices`, `optionalDevices` | 7 params discarded | fixed (blocked from end-to-end proof by §3b) |
+| `manage_audio` | C# reads `mixerPath`, Python sends `mixerName`; `groupId` unread | `expose_param`, `set_snapshot` always fail | **verified** (6000, 2022) |
 | `manage_addressables` | `schemaType`, `buildPath`, `loadPath`, `targetPlatform` unread; `labels` sent as list, read as string | `create_group` ignores all config | open |
-| `manage_build` | C# `configure_code_generation` requires `platform`; the tool's parameter is `target` | action always fails | open |
-| `manage_build` | `buildPath` now unread | dead parameter (left over from the `get_build_report` fix below) | open |
+| `manage_build` | C# `configure_code_generation` requires `platform`; the tool's parameter is `target` | action always fails | **verified** (6000, 2022) |
+| `manage_build` | `buildPath` now unread | dead parameter (left over from the `get_build_report` fix below) | **verified** (6000, 2022) |
 | `find_gameobjects` | `cursor`, `pageSize` unread | **pre-existing on `main`**, not a `develop` regression | open |
 | `manage_scene` | `sceneViewTarget` unread | **pre-existing on `main`** | open |
 
-The `manage_input_system` `path` fix currently normalizes the key inside `HandleCommand`. Gate 1 still
-flags it, correctly — that is a runtime alias, not a fixed contract. Renaming the C# reads to
-`assetPath` is the real fix.
+The runtime `path` alias in `HandleCommand` has been deleted; the 14 C# reads are now `assetPath`.
+`KNOWN_UNREACHABLE` is empty — no parameter C# requires is unreachable from Python. The only
+remaining `KNOWN_IGNORED` entries are `manage_addressables` (no verification host, below) and the
+two rows pre-existing on `main`.
 
 ---
 
@@ -85,8 +95,8 @@ the 2022.3 project (the deprecation does not apply there), pin a newer Addressab
 | `ManageBuild.cs` `get_build_report` | `BuildReport.GetReport(path)` is not public API; broke 2022 compile. Also corrected the `files`/`GetFiles()` boundary from `2023_1` to `2022_1`. | **verified** (6000, 2022) |
 | `ManageBuild.cs` stripping | `#if UNITY_6000_0_OR_NEWER` unnecessary — `SetManagedStrippingLevel` exists since 2018.3. The `#else` branch used removed enum members and mapped `Medium`→`StripByteCode`. | **verified** (6000, 2022) |
 | `ManageOptimization.cs` `iosBuildSubtarget` | Absent on 2022.3 despite sitting in the "old Unity" branch. iOS has no project-wide texture subtarget; per-texture overrides already handled below. | **verified** (6000, 2022) |
-| `ManageOptimization.cs` `globalTextureMipmapLimit` | 2022.2+ only, unguarded. Compiles on 2022.3 and 6000; **breaks the declared 2021.3 floor**. Untested — no 2021.3 editor installed. | open |
-| `ManageEditor.cs:360` | `report.GetFiles()` unguarded while `ManageBuild.cs` guards the same call. | open |
+| `ManageOptimization.cs` `globalTextureMipmapLimit` | 2022.2+ only, unguarded — **breaks the declared 2021.3 floor**. Shimmed in `Runtime/Helpers/UnityQualityCompat.cs` by reflection, because the two spellings overlap on 2022.2–2023.x. The one case where the guard was not simply deleted. | fixed (2021.3 rung not reached) |
+| `ManageEditor.cs:360` | `report.GetFiles()` unguarded while `ManageBuild.cs` guards the same call. Both now route through `Editor/Helpers/BuildReportCompat.cs`. | fixed (2021.3 rung not reached) |
 
 ---
 
@@ -95,16 +105,16 @@ the 2022.3 project (the deprecation does not apply there), pin a newer Addressab
 | Location | Problem | Status |
 |---|---|---|
 | `ManageInputSystem.cs:32` | `ResolveComponent("InputActionAsset")` — the type is a `ScriptableObject`. Guard could never pass, so the tool was dead on **every** project. | **verified** (6000 positive, 2022 negative) |
-| `ManageOptimization.cs` `batch_resize_textures` | `Mathf.Max(maxWidth ?? 8192, …)` — passing `maxWidth=512` resizes nothing. Should be `Min`. | open |
-| `ManageOptimization.cs` `batch_resize_textures` | `filter` is a resize mode in the schema but used as the `FindAssets` search string. | open |
-| `ManageOptimization.cs` `set_quality_settings` | `(ShadowResolution)512` — the enum is `Low..VeryHigh` (0–3). Produces garbage. | open |
-| `ManageOptimization.cs` `configure_texture_compression` | `GetPlatformTextureSettings("iOS"/"StandaloneWindows64")` — Unity expects `iPhone`/`Standalone`. Only Android works. | open |
-| `ManageComponents.cs:158` | `add_param_listener` sets `m_Mode = 1` (Void), so Unity ignores the argument it just wrote. Must match `paramType`. | open |
-| `ManageComponents.cs` | `InsertArrayElementAtIndex` copies the previous element; `m_Arguments` not reset, so listener #2 inherits #1's data. | open |
-| `ManageGameObject.cs:111` | `set_sibling_index` clamps to 0 when `parent == null`; root objects can never be reordered. | open |
-| `ManageBuild.cs` `configure_aab` | Never sets `buildAppBundle`; sets `buildApkPerCpuArchitecture` (APK splitting, wrong for AAB); validates `keystorePath` then discards it. | open |
-| `ManageEditor.cs` `create_folder_structure` | `AssetDatabase.CreateFolder` needs an existing parent, so `Settings/Renderer` fails — yet is still reported as created. | open |
-| `ManageEditor.cs:232` | `run_health_check` NREs when `checks` is omitted; the `prefab` check `LoadPrefabContents` on every prefab in the project. | open |
+| `ManageOptimization.cs` `batch_resize_textures` | `Mathf.Max(maxWidth ?? 8192, …)` — passing `maxWidth=512` resizes nothing. Now `Min`. | **verified** (6000, 2022) |
+| `ManageOptimization.cs` `batch_resize_textures` | `filter` is a `FilterMode` in the schema but was passed to `FindAssets` as the search string, matching nothing. Now applied to `importer.filterMode`. | **verified** (6000, 2022) |
+| `ManageOptimization.cs` `set_quality_settings` | `(ShadowResolution)512` — the enum is `Low..VeryHigh`. Also applied overrides *after* `SetQualityLevel` (which reloads them from the tier) and hard-coded level indices 0/2/4/5 that assume six tiers; the URP template ships two. Rewritten: name-match the tier, fall back to proportional position, apply overrides last, report actual state. | **verified** (6000, 2022) |
+| `ManageOptimization.cs` `configure_texture_compression` | **This row was wrong.** `iOS` and `StandaloneWindows64` are accepted on both versions — Unity aliases them. The real defect: no `SaveAndReimport`, so nothing reached the `.meta` file on *any* platform while `GetPlatformTextureSettings` still read the change back. Unrecognised platform names are also stored as dead overrides rather than rejected, and an unparseable `format` fell back to `Automatic` silently. All three fixed. | **verified** (6000, 2022) |
+| `ManageComponents.cs` listeners | Five defects, all fatal: `m_CallState` never set (defaults to `Off` — **every listener this tool ever added was disabled**), `m_Mode` hard-coded to Void, stale argument copy, `m_Target` pointed at the GameObject instead of the component, and `paramType: Object` passed the listener's own target. Also deleted three `#if UNITY_2022_2_OR_NEWER` brackets whose `#else` called `UnityEventTools` methods that do not exist. | **verified** (6000, 2022) |
+| `ManageComponents.cs` | Listener and inspection actions were unreachable: C# required `target` for every action, the Python schema sends it only for add/remove/set_property. | **verified** (6000, 2022) |
+| `ManageGameObject.cs:111` | `set_sibling_index` clamps to 0 when `parent == null`; root objects can never be reordered. Now uses `scene.rootCount`. | **verified** (6000) |
+| `ManageBuild.cs` `configure_aab` | Never set `buildAppBundle`; set `buildApkPerCpuArchitecture` (APK splitting, wrong for AAB); validated `keystorePath` then discarded it; defaulted `bundleVersionCode` to 0, resetting real projects. Passwords now come from `UNITY_ANDROID_KEYSTORE_PASS`/`UNITY_ANDROID_KEYALIAS_PASS`, never as parameters. | **verified** (6000, 2022) |
+| `ManageEditor.cs` `create_folder_structure` | `AssetDatabase.CreateFolder` needs an existing parent, so `Settings/Renderer` failed — yet was reported as created. Creates each level in turn and checks the returned GUID. | **verified** (6000, 2022) |
+| `ManageEditor.cs:232` | `run_health_check` NREs when `checks` is omitted. Defaults to the three cheap checks; `prefab` stays opt-in and the response names what ran. | **verified** (6000, 2022) |
 
 ---
 
@@ -146,8 +156,8 @@ The worst class for an agent: it believes the work is done.
 | Location | Problem | Status |
 |---|---|---|
 | `ManageAudio.cs` `SetSnapshot` | Returns `SuccessResponse("Transitioning to snapshot…")` even when all three reflection fallbacks fail. | open |
-| `ManageAudio.cs:371` | `Activator.CreateInstance(AudioMixerController)` — a `ScriptableObject` created without `CreateInstance` has no native object. Asset is broken; correct API is `AudioMixerController.CreateMixerControllerAtPath`. | open |
-| `ManageEditor.cs` `create_folder_structure` | Adds to `created` without checking the returned GUID. | open |
+| `ManageAudio.cs:371` | `Activator.CreateInstance(AudioMixerController)` — a `ScriptableObject` created without `CreateInstance` has no native object. Asset is broken; correct API is `AudioMixerController.CreateMixerControllerAtPath`. | **verified** (6000, 2022) |
+| `ManageEditor.cs` `create_folder_structure` | Adds to `created` without checking the returned GUID. | **verified** (6000, 2022) |
 | `ManageOptimization.cs` (fixed) | Unity 6 branch used `AssetDatabase.AddObjectToAsset(sprite, atlas)` — embeds the sprite into the atlas file instead of registering a packable. | **verified** (6000, 2022) |
 
 ---

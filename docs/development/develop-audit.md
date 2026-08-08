@@ -64,6 +64,19 @@ flags it, correctly — that is a runtime alias, not a fixed contract. Renaming 
 
 ---
 
+### `manage_addressables` has no verification host
+
+Its four ignored parameters are still open, and they cannot be verified live yet.
+`com.unity.addressables` 2.3.16 — the version Unity resolves — **does not compile on Unity
+6000.5.3f1**: `AsyncOperationBase.cs:282` and `VirtualAssetBundle.cs:37` still call
+`Object.GetInstanceID()`, which 6000.5 raises as CS0619. Installing it broke the probe project's
+compile and dropped the bridge; the package was removed and the project recovered.
+
+This is the same deprecation `Runtime/Helpers/UnityObjectIdCompat.cs` shims for our own code, but it
+is inside the package, so it cannot be patched from here. Remaining options: host Addressables on
+the 2022.3 project (the deprecation does not apply there), pin a newer Addressables that supports
+6000.5, or mark the rows CI-only.
+
 ## 2. Version guards written from assumption
 
 | Location | Problem | Status |

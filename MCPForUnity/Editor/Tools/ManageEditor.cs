@@ -208,20 +208,39 @@ namespace MCPForUnity.Editor.Tools
                     };
 
                     var created = new List<string>();
+                    var failed = new List<string>();
                     foreach (var folder in folders)
                     {
-                        string fullPath = System.IO.Path.Combine(rootPath, folder)
-                            .Replace("\\", "/");
-                        if (!AssetDatabase.IsValidFolder(fullPath))
+                        // AssetDatabase.CreateFolder requires the parent to exist already, so a
+                        // nested entry like "Settings/Renderer" has to be created one level at a
+                        // time. It also signals failure by returning an empty GUID rather than
+                        // throwing, which is why every level below is checked.
+                        string current = rootPath;
+                        foreach (var segment in folder.Replace("\\", "/").Split('/'))
                         {
-                            string parent = System.IO.Path.GetDirectoryName(fullPath)
-                                .Replace("\\", "/");
-                            string name = System.IO.Path.GetFileName(fullPath);
-                            string guid = AssetDatabase.CreateFolder(parent, name);
-                            created.Add(fullPath);
+                            if (string.IsNullOrEmpty(segment)) continue;
+
+                            string next = $"{current}/{segment}";
+                            if (!AssetDatabase.IsValidFolder(next))
+                            {
+                                string guid = AssetDatabase.CreateFolder(current, segment);
+                                if (string.IsNullOrEmpty(guid))
+                                {
+                                    failed.Add(next);
+                                    break;
+                                }
+                                created.Add(next);
+                            }
+                            current = next;
                         }
                     }
                     AssetDatabase.Refresh();
+
+                    if (failed.Count > 0)
+                        return new ErrorResponse("FOLDER_CREATE_FAILED",
+                            $"Could not create {failed.Count} folder(s) under '{rootPath}'.",
+                            new { created, failed });
+
                     return new SuccessResponse(
                         $"Created {created.Count} folders ({structure} structure)",
                         new { created });
@@ -229,7 +248,13 @@ namespace MCPForUnity.Editor.Tools
 
                 case "run_health_check":
                 {
+                    // 'checks' is optional in the schema, so omitting it must not NRE. The default
+                    // set leaves out "prefab": it calls LoadPrefabContents on every prefab in the
+                    // project, which is minutes of work on a real one, so it is opt-in.
                     string[] checks = p.GetStringArray("checks");
+                    if (checks == null || checks.Length == 0)
+                        checks = new[] { "compile", "missing_ref", "texture_size" };
+
                     var results = new List<object>();
 
                     foreach (var check in checks)
@@ -343,7 +368,12 @@ namespace MCPForUnity.Editor.Tools
                     });
                     return new SuccessResponse(
                         $"Health check: {failCount} failed",
-                        new { results });
+                        new
+                        {
+                            results,
+                            checksRun = checks,
+                            checksAvailable = new[] { "compile", "prefab", "missing_ref", "texture_size" }
+                        });
                 }
 
                 case "generate_report":
@@ -362,10 +392,10 @@ namespace MCPForUnity.Editor.Tools
                                 totalSize = report.summary.totalSize,
                                 result = report.summary.result.ToString(),
                                 platform = report.summary.platform.ToString(),
-                                files = report.GetFiles()?.Select(f => new
+                                files = BuildReportCompat.GetFiles(report)?.Select(f => new
                                 {
-                                    path = f.path,
-                                    size = f.size
+                                    path = f.Path,
+                                    size = f.Size
                                 }).ToList()
                             });
 

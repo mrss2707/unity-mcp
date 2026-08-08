@@ -21,11 +21,6 @@ namespace MCPForUnity.Editor.Tools
         private static Type _mixerControllerType;
 
         /// <summary>
-        /// Cached AudioMixerSnapshot type for reflection-based snapshot operations.
-        /// </summary>
-        private static Type _snapshotType;
-
-        /// <summary>
         /// Whether we have attempted reflection init for mixer types.
         /// </summary>
         private static bool _mixerReflectionInitAttempted;
@@ -44,7 +39,6 @@ namespace MCPForUnity.Editor.Tools
             try
             {
                 _mixerControllerType = Type.GetType("UnityEditor.Audio.AudioMixerController, UnityEditor");
-                _snapshotType = Type.GetType("UnityEditor.Audio.AudioMixerSnapshotController, UnityEditor");
             }
             catch
             {
@@ -567,107 +561,79 @@ namespace MCPForUnity.Editor.Tools
         // ─────────────────────────────────────────────
 
         /// <summary>
-        /// Sets an AudioMixer snapshot via reflection, transitioning over fadeTime.
+        /// Selects an AudioMixer snapshot. In play mode this performs the real timed transition;
+        /// in edit mode it switches the mixer's target (edited) snapshot, which is what the
+        /// Audio Mixer window does, and fadeTime does not apply.
         /// </summary>
+        /// <remarks>
+        /// The previous implementation searched for a method called "TransitionToSnapshot" through
+        /// three reflection fallbacks and reported success whether or not any of them resolved.
+        /// No such method exists on AudioMixer or AudioMixerController on any supported version —
+        /// enumerated live on 6000.5.3f1 — so this action had never once done anything.
+        /// AudioMixer.FindSnapshot and AudioMixerSnapshot.TransitionTo are public runtime API and
+        /// need no reflection at all; only TargetSnapshot does.
+        /// </remarks>
         private static object SetSnapshot(ToolParams p)
         {
             try
             {
-                if (!EnsureMixerReflectionCache())
-                    return new ErrorResponse("MIXER_NOT_SUPPORTED",
-                        "Audio Mixer API is not available. Ensure you are using Unity Editor (not a runtime build).");
-
                 string mixerPath = p.Get("mixerPath");
                 if (string.IsNullOrEmpty(mixerPath))
                     return new ErrorResponse("'mixerPath' parameter is required.");
 
                 mixerPath = AssetPathUtility.SanitizeAssetPath(mixerPath);
                 if (mixerPath == null)
-                    return new ErrorResponse("Invalid path: contains traversal sequences.");
+                    return new ErrorResponse("INVALID_PATH", "Invalid path: contains traversal sequences.");
 
-                var mixerAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(mixerPath);
-                if (mixerAsset == null || !_mixerControllerType.IsInstanceOfType(mixerAsset))
+                var mixer = AssetDatabase.LoadAssetAtPath<UnityEngine.Audio.AudioMixer>(mixerPath);
+                if (mixer == null)
                     return new ErrorResponse("MIXER_NOT_FOUND", $"No AudioMixer found at '{mixerPath}'.");
 
                 string snapshotName = p.Get("snapshotName");
                 if (string.IsNullOrEmpty(snapshotName))
                     return new ErrorResponse("'snapshotName' parameter is required.");
 
+                var snapshot = mixer.FindSnapshot(snapshotName);
+                if (snapshot == null)
+                    return new ErrorResponse("SNAPSHOT_NOT_FOUND",
+                        $"AudioMixer at '{mixerPath}' has no snapshot named '{snapshotName}'.");
+
                 float fadeTime = p.GetFloat("fadeTime") ?? 0.1f;
 
-                // Find the snapshot by name via reflection
-                var snapshotsProp = _mixerControllerType.GetProperty("snapshots",
+                if (EditorApplication.isPlaying)
+                {
+                    snapshot.TransitionTo(fadeTime);
+                    return new SuccessResponse(
+                        $"Transitioning to snapshot '{snapshotName}' over {fadeTime}s.",
+                        new { path = mixerPath, snapshotName, fadeTime, mode = "transition" });
+                }
+
+                // Edit mode: AudioMixerController.TargetSnapshot is internal, so this one property
+                // needs reflection. It takes an AudioMixerSnapshotController, which is what
+                // FindSnapshot returns at edit time.
+                var targetProp = mixer.GetType().GetProperty("TargetSnapshot",
                     BindingFlags.Public | BindingFlags.Instance);
-                if (snapshotsProp == null)
-                    return new ErrorResponse("MIXER_API_INCOMPATIBLE", "Cannot access snapshots on this Unity version.");
+                if (targetProp == null || !targetProp.CanWrite)
+                    return new ErrorResponse("MIXER_API_INCOMPATIBLE",
+                        "AudioMixerController.TargetSnapshot is not available in this Unity version. "
+                        + "Enter play mode to transition snapshots instead.");
+                if (!targetProp.PropertyType.IsInstanceOfType(snapshot))
+                    return new ErrorResponse("MIXER_API_INCOMPATIBLE",
+                        $"FindSnapshot returned {snapshot.GetType().Name}, but TargetSnapshot expects "
+                        + $"{targetProp.PropertyType.Name}.");
 
-                var snapshots = (Array)snapshotsProp.GetValue(mixerAsset);
-                if (snapshots == null || snapshots.Length == 0)
-                    return new ErrorResponse("NO_SNAPSHOTS", "No snapshots found on this AudioMixer.");
+                targetProp.SetValue(mixer, snapshot);
+                EditorUtility.SetDirty(mixer);
+                AssetDatabase.SaveAssets();
 
-                object targetSnapshot = null;
-                var nameProp = _snapshotType?.GetProperty("name") ?? snapshots.GetType().GetElementType()?.GetProperty("name");
-
-                for (int i = 0; i < snapshots.Length; i++)
-                {
-                    var snapshot = snapshots.GetValue(i);
-                    var snapName = nameProp != null ? (string)nameProp.GetValue(snapshot) : null;
-                    if (snapName == snapshotName)
-                    {
-                        targetSnapshot = snapshot;
-                        break;
-                    }
-                }
-
-                if (targetSnapshot == null)
-                    return new ErrorResponse("SNAPSHOT_NOT_FOUND", $"Snapshot '{snapshotName}' not found on this AudioMixer.");
-
-                // Call TransitionTo on the snapshot via reflection
-                // The method signature is: TransitionTo( AudioMixerSnapshotController snapshot, float fadeTime )
-                // Actually, the transition is typically on the mixer controller itself.
-                // Try AudioMixerController.TransitionToSnapshot or similar.
-                var transitionMethod = _mixerControllerType.GetMethod("TransitionToSnapshot",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    null, new[] { _snapshotType ?? targetSnapshot.GetType(), typeof(float) }, null);
-
-                if (transitionMethod == null)
-                {
-                    // Try with object parameter
-                    transitionMethod = _mixerControllerType.GetMethod("TransitionToSnapshot",
-                        BindingFlags.Public | BindingFlags.Instance,
-                        null, new[] { typeof(UnityEngine.Object), typeof(float) }, null);
-                }
-
-                if (transitionMethod == null)
-                {
-                    // Last resort: find any TransitionTo method
-                    transitionMethod = _mixerControllerType.GetMethod("TransitionToSnapshot",
-                        BindingFlags.Public | BindingFlags.Instance);
-                }
-
-                if (transitionMethod != null)
-                {
-                    var parameters = transitionMethod.GetParameters();
-                    if (parameters.Length == 2)
-                    {
-                        var snapshotParam = targetSnapshot;
-                        // If the method expects UnityEngine.Object, wrap as needed
-                        if (parameters[0].ParameterType == typeof(UnityEngine.Object))
-                            snapshotParam = targetSnapshot as UnityEngine.Object ?? targetSnapshot;
-
-                        transitionMethod.Invoke(mixerAsset, new[] { snapshotParam, (object)fadeTime });
-                    }
-                    else if (parameters.Length == 1)
-                    {
-                        transitionMethod.Invoke(mixerAsset, new[] { targetSnapshot });
-                    }
-                }
-
-                EditorUtility.SetDirty(mixerAsset);
+                var applied = targetProp.GetValue(mixer) as UnityEngine.Object;
+                if (applied == null || applied.name != snapshotName)
+                    return new ErrorResponse("SNAPSHOT_NOT_APPLIED",
+                        $"Target snapshot is '{applied?.name ?? "none"}' after setting '{snapshotName}'.");
 
                 return new SuccessResponse(
-                    $"Transitioning to snapshot '{snapshotName}' with fade time {fadeTime}s.",
-                    new { path = mixerPath, snapshotName, fadeTime });
+                    $"Target snapshot set to '{snapshotName}'. fadeTime applies only in play mode.",
+                    new { path = mixerPath, snapshotName, mode = "target", fadeTimeApplied = false });
             }
             catch (Exception ex)
             {

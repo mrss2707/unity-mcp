@@ -155,7 +155,7 @@ The worst class for an agent: it believes the work is done.
 
 | Location | Problem | Status |
 |---|---|---|
-| `ManageAudio.cs` `SetSnapshot` | Returns `SuccessResponse("Transitioning to snapshot…")` even when all three reflection fallbacks fail. | open |
+| `ManageAudio.cs` `SetSnapshot` | Worse than reported: all three fallbacks searched for `TransitionToSnapshot`, which exists on **no** Unity type — enumerated live. The action had never done anything. Rewritten on public `FindSnapshot`/`TransitionTo` (play mode) and `TargetSnapshot` (edit mode), with read-back. | **verified** (6000, 2022) |
 | `ManageAudio.cs:371` | `Activator.CreateInstance(AudioMixerController)` — a `ScriptableObject` created without `CreateInstance` has no native object. Asset is broken; correct API is `AudioMixerController.CreateMixerControllerAtPath`. | **verified** (6000, 2022) |
 | `ManageEditor.cs` `create_folder_structure` | Adds to `created` without checking the returned GUID. | **verified** (6000, 2022) |
 | `ManageOptimization.cs` (fixed) | Unity 6 branch used `AssetDatabase.AddObjectToAsset(sprite, atlas)` — embeds the sprite into the atlas file instead of registering a packable. | **verified** (6000, 2022) |

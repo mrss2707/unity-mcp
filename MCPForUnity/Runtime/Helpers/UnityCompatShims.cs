@@ -14,6 +14,8 @@ namespace MCPForUnity.Runtime.Helpers
     ///                                            Physics{,2D}.autoSimulation → simulationMode (2022.2)
     ///   • <see cref="UnityAssembliesCompat"/>  — AppDomain.GetAssemblies →
     ///                                            UnityEngine.Assemblies.CurrentAssemblies (Unity 6.8 CoreCLR)
+    ///   • <see cref="UnityQualityCompat"/>     — QualitySettings.masterTextureLimit →
+    ///                                            globalTextureMipmapLimit (2022.2 → obsolete in 6000)
     ///
     /// When to add a new shim:
     ///   1. The API is marked [Obsolete] AND the call site can't simply be deleted, OR

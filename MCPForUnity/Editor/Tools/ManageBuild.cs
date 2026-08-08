@@ -72,7 +72,6 @@ namespace MCPForUnity.Editor.Tools
                                 _ => Il2CppCompilerConfiguration.Release
                             });
 
-#if UNITY_6000_0_OR_NEWER
                         PlayerSettings.SetManagedStrippingLevel(namedTarget,
                             stripping switch
                             {
@@ -82,16 +81,6 @@ namespace MCPForUnity.Editor.Tools
                                 "High" => ManagedStrippingLevel.High,
                                 _ => ManagedStrippingLevel.Low
                             });
-#else
-                        PlayerSettings.strippingLevel = stripping switch
-                        {
-                            "Disabled" => StrippingLevel.Disabled,
-                            "Low" => StrippingLevel.StripAssemblies,
-                            "Medium" => StrippingLevel.StripByteCode,
-                            "High" => StrippingLevel.UseMicroMSCorlib,
-                            _ => StrippingLevel.StripAssemblies
-                        };
-#endif
 
                         if (preserve != null && preserve.Length > 0)
                         {
@@ -135,21 +124,13 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "get_build_report":
                     {
-#if UNITY_2023_1_OR_NEWER
-                        // BuildReport.GetReport(path) removed in Unity 2023.1
                         var report = BuildReport.GetLatestReport();
-#else
-                        string buildPath = p.Get("buildPath");
-                        var report = string.IsNullOrEmpty(buildPath)
-                            ? BuildReport.GetLatestReport()
-                            : BuildReport.GetReport(buildPath);
-#endif
 
                         if (report == null)
                             return new ErrorResponse("NO_BUILD_REPORT",
                                 "No build report found. Run manage_build(action='build') first.");
 
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_2022_1_OR_NEWER
                         var buildFiles = report.GetFiles()?.Select(f => new
                         {
                             path = f.path,

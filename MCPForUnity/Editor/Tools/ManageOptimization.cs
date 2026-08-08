@@ -6,6 +6,7 @@ using MCPForUnity.Editor.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
+using UnityEditor.U2D;
 using UnityEngine;
 using UnityEngine.U2D;
 
@@ -238,25 +239,8 @@ namespace MCPForUnity.Editor.Tools
                         };
                     }
                 }
-                else if (platformLower == "ios" || platformLower == "iphone" || platformLower == "tvos")
-                {
-                    if (!string.IsNullOrEmpty(format))
-                    {
-                        string formatLower = format.ToLowerInvariant();
-#if !UNITY_2023_1_OR_NEWER
-                        EditorUserBuildSettings.iosBuildSubtarget = formatLower switch
-                        {
-                            "pvrtc" => MobileTextureSubtarget.PVRTC,
-                            "astc" => MobileTextureSubtarget.ASTC,
-                            "etc" or "etc2" => MobileTextureSubtarget.ETC2,
-                            _ => MobileTextureSubtarget.Generic
-                        };
-#else
-                        // iosBuildSubtarget removed in Unity 2023.1+
-                        // Per-texture platform overrides are applied below via TextureImporter
-#endif
-                    }
-                }
+                // iOS/tvOS have no project-wide texture subtarget switch (unlike Android);
+                // compression is set per texture via the TextureImporter overrides applied below.
 
                 // Apply platform overrides to individual textures under path
                 int updatedCount = 0;
@@ -453,41 +437,9 @@ namespace MCPForUnity.Editor.Tools
                     AssetDatabase.CreateAsset(atlas, outputPath);
                 }
 
-                // Apply packing settings
-                // SpriteAtlas API history:
-                //   Pre-2022.2:  GetPackingSettings() / SetPackingSettings() / Add()
-                //   2022.2-2023: enableRotation etc. direct properties / Add()
-                //   6000.0+:     All removed — use SerializedObject / AssetDatabase.AddObjectToAsset()
-#if UNITY_6000_0_OR_NEWER
-                var packingToken = p.GetRaw("packingSettings") as JObject;
-                if (packingToken != null)
-                {
-                    using (var atlasSo = new SerializedObject(atlas))
-                    {
-                        var enableRotationProp = atlasSo.FindProperty("m_EnableRotation");
-                        var enableTightPackingProp = atlasSo.FindProperty("m_EnableTightPacking");
-                        var paddingProp = atlasSo.FindProperty("m_Padding");
-                        if (packingToken["allowRotation"] != null && enableRotationProp != null)
-                            enableRotationProp.boolValue = packingToken["allowRotation"].Value<bool>();
-                        if (packingToken["tightPacking"] != null && enableTightPackingProp != null)
-                            enableTightPackingProp.boolValue = packingToken["tightPacking"].Value<bool>();
-                        if (packingToken["padding"] != null && paddingProp != null)
-                            paddingProp.intValue = packingToken["padding"].Value<int>();
-                        atlasSo.ApplyModifiedProperties();
-                    }
-                }
-#elif UNITY_2022_2_OR_NEWER
-                var packingToken = p.GetRaw("packingSettings") as JObject;
-                if (packingToken != null)
-                {
-                    if (packingToken["allowRotation"] != null)
-                        atlas.enableRotation = packingToken["allowRotation"].Value<bool>();
-                    if (packingToken["tightPacking"] != null)
-                        atlas.enableTightPacking = packingToken["tightPacking"].Value<bool>();
-                    if (packingToken["padding"] != null)
-                        atlas.padding = packingToken["padding"].Value<int>();
-                }
-#else
+                // Apply packing settings. UnityEditor.U2D.SpriteAtlasExtensions supplies
+                // GetPackingSettings/SetPackingSettings/Add on every supported version (2021.3 → 6.x);
+                // SpriteAtlas itself never exposed these as direct properties.
                 var packingParams = atlas.GetPackingSettings();
                 var packingToken = p.GetRaw("packingSettings") as JObject;
                 if (packingToken != null)
@@ -500,7 +452,6 @@ namespace MCPForUnity.Editor.Tools
                         packingParams.padding = packingToken["padding"].Value<int>();
                     atlas.SetPackingSettings(packingParams);
                 }
-#endif
 
                 // Add sprites/textures from include paths
                 string[] includePaths = p.GetStringArray("includePaths");
@@ -518,11 +469,7 @@ namespace MCPForUnity.Editor.Tools
                             string spritePath = AssetDatabase.GUIDToAssetPath(guid);
                             var spriteObj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(spritePath);
                             if (spriteObj != null)
-#if UNITY_6000_0_OR_NEWER
-                                AssetDatabase.AddObjectToAsset(spriteObj, atlas);
-#else
                                 atlas.Add(new[] { spriteObj });
-#endif
                         }
                     }
                 }
@@ -530,45 +477,6 @@ namespace MCPForUnity.Editor.Tools
                 EditorUtility.SetDirty(atlas);
                 AssetDatabase.SaveAssets();
 
-#if UNITY_6000_0_OR_NEWER
-                bool allowRotation, tightPacking;
-                int padding;
-                using (var atlasSo = new SerializedObject(atlas))
-                {
-                    allowRotation = atlasSo.FindProperty("m_EnableRotation")?.boolValue ?? false;
-                    tightPacking = atlasSo.FindProperty("m_EnableTightPacking")?.boolValue ?? false;
-                    padding = atlasSo.FindProperty("m_Padding")?.intValue ?? 4;
-                }
-                return new SuccessResponse(
-                    isNew ? $"SpriteAtlas '{atlasName}' created at '{outputPath}'." :
-                            $"SpriteAtlas '{atlasName}' configured at '{outputPath}'.",
-                    new
-                    {
-                        path = outputPath,
-                        isNew,
-                        packingSettings = new
-                        {
-                            allowRotation,
-                            tightPacking,
-                            padding
-                        }
-                    });
-#elif UNITY_2022_2_OR_NEWER
-                return new SuccessResponse(
-                    isNew ? $"SpriteAtlas '{atlasName}' created at '{outputPath}'." :
-                            $"SpriteAtlas '{atlasName}' configured at '{outputPath}'.",
-                    new
-                    {
-                        path = outputPath,
-                        isNew,
-                        packingSettings = new
-                        {
-                            allowRotation = atlas.enableRotation,
-                            tightPacking = atlas.enableTightPacking,
-                            padding = atlas.padding
-                        }
-                    });
-#else
                 var appliedPacking = atlas.GetPackingSettings();
 
                 return new SuccessResponse(
@@ -585,7 +493,6 @@ namespace MCPForUnity.Editor.Tools
                             padding = appliedPacking.padding
                         }
                     });
-#endif
             }
             catch (Exception ex)
             {

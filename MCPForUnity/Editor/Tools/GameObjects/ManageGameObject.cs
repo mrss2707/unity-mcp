@@ -108,13 +108,20 @@ namespace MCPForUnity.Editor.Tools.GameObjects
                     {
                         var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
                         int index = p.GetInt("index") ?? 0;
-                        int maxIndex = go.transform.parent != null
-                            ? go.transform.parent.childCount - 1 : 0;
-                        go.transform.SetSiblingIndex(Mathf.Clamp(index, 0, maxIndex));
+                        // A root object's siblings are the scene's other roots, not "nothing" —
+                        // clamping to 0 whenever parent is null made root objects unorderable.
+                        int siblingCount = go.transform.parent != null
+                            ? go.transform.parent.childCount
+                            : go.scene.rootCount;
+                        int clamped = Mathf.Clamp(index, 0, Mathf.Max(0, siblingCount - 1));
+
+                        UnityEditor.Undo.RegisterCompleteObjectUndo(go.transform, "Set Sibling Index");
+                        go.transform.SetSiblingIndex(clamped);
+
+                        int actual = go.transform.GetSiblingIndex();
                         return new SuccessResponse(
-                            $"Set sibling index to {Mathf.Clamp(index, 0, maxIndex)}" +
-                            (index != Mathf.Clamp(index, 0, maxIndex)
-                                ? $" (clamped from {index})" : ""));
+                            $"Set sibling index to {actual}" + (index != actual ? $" (requested {index})" : ""),
+                            new { requestedIndex = index, siblingIndex = actual, siblingCount });
                     }
 
                     case "get_detailed_info":

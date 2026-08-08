@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using MCPForUnity.Editor.Helpers;
+using MCPForUnity.Editor.Tools.Build;
+using MCPForUnity.Runtime.Helpers;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
@@ -70,71 +72,46 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(preset))
                     return new ErrorResponse("'preset' parameter is required (low, medium, high, ultra).");
 
-                string platform = p.Get("platform");
-
-                // Resolve BuildTargetGroup for platform-specific quality
-                BuildTargetGroup targetGroup = BuildTargetGroup.Unknown;
-                if (!string.IsNullOrEmpty(platform))
-                {
-                    try
-                    {
-                        // Try common platform name mappings
-                        string platformLower = platform.ToLowerInvariant();
-                        targetGroup = platformLower switch
-                        {
-                            "standalone" or "windows" or "mac" or "linux" => BuildTargetGroup.Standalone,
-                            "android" => BuildTargetGroup.Android,
-                            "ios" or "iphone" => BuildTargetGroup.iOS,
-                            "webgl" => BuildTargetGroup.WebGL,
-                            "ps4" or "playstation4" => BuildTargetGroup.PS4,
-                            "ps5" or "playstation5" => BuildTargetGroup.PS5,
-                            "switch" or "nintendo" => BuildTargetGroup.Switch,
-                            "xboxone" => BuildTargetGroup.XboxOne,
-                            "tvOS" or "tvos" or "apple tv" => BuildTargetGroup.tvOS,
-                            _ => (BuildTargetGroup)Enum.Parse(typeof(BuildTargetGroup), platform, ignoreCase: true)
-                        };
-                    }
-                    catch
-                    {
-                        return new ErrorResponse("INVALID_PLATFORM", $"Unknown platform '{platform}'.");
-                    }
-                }
-
-                // Map preset to quality parameters
-                int shadowResolution;
-                int textureQuality;
+                // Map preset to quality parameters. shadowResolution is an enum with four members
+                // (Low..VeryHigh) — the pixel counts it corresponds to are not the values.
+                UnityEngine.ShadowResolution shadowResolution;
+                int mipmapLimit;
                 float lodBias;
                 int antiAliasing;
+                int shadowCascades;
 
                 switch (preset.ToLowerInvariant())
                 {
                     case "low":
-                        shadowResolution = 512;
-                        textureQuality = QualitySettings.globalTextureMipmapLimit; // half res
-                        QualitySettings.globalTextureMipmapLimit = 1;
+                        shadowResolution = UnityEngine.ShadowResolution.Low;
+                        mipmapLimit = 1; // half res
                         lodBias = 0.5f;
                         antiAliasing = 0;
+                        shadowCascades = 1; // 0 is not a legal value — Unity clamps it up to 1
                         break;
 
                     case "medium":
-                        shadowResolution = 1024;
-                        QualitySettings.globalTextureMipmapLimit = 0; // full res
+                        shadowResolution = UnityEngine.ShadowResolution.Medium;
+                        mipmapLimit = 0; // full res
                         lodBias = 1.0f;
                         antiAliasing = 2;
+                        shadowCascades = 2;
                         break;
 
                     case "high":
-                        shadowResolution = 2048;
-                        QualitySettings.globalTextureMipmapLimit = 0;
+                        shadowResolution = UnityEngine.ShadowResolution.High;
+                        mipmapLimit = 0;
                         lodBias = 2.0f;
                         antiAliasing = 4;
+                        shadowCascades = 4;
                         break;
 
                     case "ultra":
-                        shadowResolution = 4096;
-                        QualitySettings.globalTextureMipmapLimit = 0;
+                        shadowResolution = UnityEngine.ShadowResolution.VeryHigh;
+                        mipmapLimit = 0;
                         lodBias = 4.0f;
                         antiAliasing = 8;
+                        shadowCascades = 4;
                         break;
 
                     default:
@@ -142,55 +119,37 @@ namespace MCPForUnity.Editor.Tools
                             $"Unknown preset '{preset}'. Valid values: low, medium, high, ultra.");
                 }
 
-                // Apply individual quality settings
-                QualitySettings.shadowResolution = (UnityEngine.ShadowResolution)shadowResolution;
-                QualitySettings.lodBias = lodBias;
-                QualitySettings.antiAliasing = antiAliasing;
-                QualitySettings.shadowCascades = preset.ToLowerInvariant() switch
+                string platform = p.Get("platform");
+                string resolvedLevelName = null;
+                if (!string.IsNullOrEmpty(platform))
                 {
-                    "low" => 0,
-                    "medium" => 2,
-                    "high" or "ultra" => 4,
-                    _ => QualitySettings.shadowCascades
-                };
-
-                // Select named quality level for the target group
-                if (targetGroup != BuildTargetGroup.Unknown)
-                {
-                    int levelIndex = preset.ToLowerInvariant() switch
-                    {
-                        "low" => 0,
-                        "medium" => 2,
-                        "high" => 4,
-                        "ultra" => 5,
-                        _ => -1
-                    };
-
-                    if (levelIndex >= 0)
-                    {
-#if !UNITY_2022_2_OR_NEWER
-                        int[] levels = QualitySettings.GetQualityLevelsForPlatform(targetGroup);
-                        if (levels != null && levels.Length > 0)
-                        {
-#endif
-                            int clampedIndex = Mathf.Min(levelIndex, QualitySettings.names.Length - 1);
-                            QualitySettings.SetQualityLevel(clampedIndex, applyExpensiveChanges: true);
-#if !UNITY_2022_2_OR_NEWER
-                        }
-#endif
-                    }
+                    object levelError = SelectQualityLevel(platform, preset, out resolvedLevelName);
+                    if (levelError != null) return levelError;
                 }
 
+                // Overrides are applied AFTER SetQualityLevel: switching level reloads every value
+                // from the project's quality tier, so applying them first would silently discard them.
+                QualitySettings.shadowResolution = shadowResolution;
+                QualitySettings.lodBias = lodBias;
+                QualitySettings.antiAliasing = antiAliasing;
+                QualitySettings.shadowCascades = shadowCascades;
+                bool mipmapApplied = UnityQualityCompat.TrySetGlobalTextureMipmapLimit(mipmapLimit);
+
+                // Report what QualitySettings actually holds now, not what was requested.
                 return new SuccessResponse(
                     $"Quality settings applied: preset '{preset}'.",
                     new
                     {
                         preset,
                         platform = string.IsNullOrEmpty(platform) ? null : platform,
-                        shadowResolution,
-                        masterTextureLimit = QualitySettings.globalTextureMipmapLimit,
-                        lodBias,
-                        antiAliasing,
+                        qualityLevel = QualitySettings.names[QualitySettings.GetQualityLevel()],
+                        resolvedLevelName,
+                        shadowResolution = QualitySettings.shadowResolution.ToString(),
+                        globalTextureMipmapLimit = mipmapApplied
+                            ? UnityQualityCompat.GetGlobalTextureMipmapLimit()
+                            : null,
+                        lodBias = QualitySettings.lodBias,
+                        antiAliasing = QualitySettings.antiAliasing,
                         shadowCascades = QualitySettings.shadowCascades
                     });
             }
@@ -198,6 +157,73 @@ namespace MCPForUnity.Editor.Tools
             {
                 return new ErrorResponse("SET_QUALITY_FAILED", $"Failed to set quality settings: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Switches to the quality level that best matches <paramref name="preset"/> among the
+        /// levels the project actually enables for <paramref name="platform"/>. Returns an
+        /// ErrorResponse on failure, or null on success with the chosen level in
+        /// <paramref name="levelName"/>.
+        /// </summary>
+        /// <remarks>
+        /// Level indices cannot be hard-coded: the default project has six tiers, but a URP
+        /// template ships two ("Mobile", "PC"), so index 4 for "high" lands wherever it lands.
+        /// Match the tier by name first, and fall back to the preset's proportional position in
+        /// whatever list this project defines.
+        /// </remarks>
+        private static object SelectQualityLevel(string platform, string preset, out string levelName)
+        {
+            levelName = null;
+
+            if (!BuildTargetMapping.TryResolveBuildTarget(platform, out BuildTarget buildTarget))
+                return new ErrorResponse("INVALID_PLATFORM", BuildTargetMapping.GetUnknownBuildTargetMessage(platform));
+
+            string platformName = BuildTargetMapping.GetPlatformSettingsName(buildTarget);
+            if (platformName == null)
+                return new ErrorResponse("PLATFORM_UNSUPPORTED",
+                    $"Build target '{buildTarget}' has no per-platform quality level list.");
+
+            int[] levels = QualitySettings.GetActiveQualityLevelsForPlatform(platformName);
+            if (levels == null || levels.Length == 0)
+                return new ErrorResponse("NO_QUALITY_LEVELS",
+                    $"No quality levels are enabled for '{platformName}' in Project Settings > Quality.");
+
+            string[] names = QualitySettings.names;
+            string[] synonyms = preset.ToLowerInvariant() switch
+            {
+                "low" => new[] { "low", "mobile", "fastest", "fast", "performant" },
+                "medium" => new[] { "medium", "simple", "good", "balanced" },
+                "high" => new[] { "high", "beautiful", "pc", "desktop" },
+                _ => new[] { "ultra", "veryhigh", "fantastic", "max" },
+            };
+
+            int chosen = -1;
+            foreach (int level in levels)
+            {
+                if (level < 0 || level >= names.Length) continue;
+                string normalized = names[level].Replace(" ", string.Empty).ToLowerInvariant();
+                if (Array.IndexOf(synonyms, normalized) >= 0)
+                {
+                    chosen = level;
+                    break;
+                }
+            }
+
+            if (chosen < 0)
+            {
+                float position = preset.ToLowerInvariant() switch
+                {
+                    "low" => 0f,
+                    "medium" => 1f / 3f,
+                    "high" => 2f / 3f,
+                    _ => 1f,
+                };
+                chosen = levels[Mathf.Clamp(Mathf.RoundToInt(position * (levels.Length - 1)), 0, levels.Length - 1)];
+            }
+
+            QualitySettings.SetQualityLevel(chosen, applyExpensiveChanges: true);
+            levelName = names[chosen];
+            return null;
         }
 
         // ─────────────────────────────────────────────
@@ -219,69 +245,99 @@ namespace MCPForUnity.Editor.Tools
                 string format = p.Get("format");
                 string path = p.Get("path");
 
-                string platformLower = platform.ToLowerInvariant();
+                if (!BuildTargetMapping.TryResolveBuildTarget(platform, out BuildTarget buildTarget))
+                    return new ErrorResponse("INVALID_PLATFORM", BuildTargetMapping.GetUnknownBuildTargetMessage(platform));
 
-                // Set platform-wide compression targets
-                if (platformLower == "android")
+                string importerPlatform = BuildTargetMapping.GetPlatformSettingsName(buildTarget);
+                if (importerPlatform == null)
+                    return new ErrorResponse("PLATFORM_UNSUPPORTED",
+                        $"Build target '{buildTarget}' has no texture importer override page.");
+
+                // Set platform-wide compression targets. Only the mobile families map onto a
+                // subtarget; anything else (DXT5, an exact ASTC_4x4 member) leaves the
+                // project-wide switch alone rather than resetting it to Generic.
+                if (buildTarget == BuildTarget.Android && !string.IsNullOrEmpty(format))
                 {
-                    if (!string.IsNullOrEmpty(format))
+                    switch (format.ToLowerInvariant())
                     {
-                        string formatLower = format.ToLowerInvariant();
-                        EditorUserBuildSettings.androidBuildSubtarget = formatLower switch
-                        {
-                            "etc" or "etc1" => MobileTextureSubtarget.ETC,
-                            "astc" => MobileTextureSubtarget.ASTC,
-#if !UNITY_2022_1_OR_NEWER
-                            "pvrtc" => MobileTextureSubtarget.PVRTC,
-#endif
-                            "etc2" => MobileTextureSubtarget.ETC2,
-                            _ => MobileTextureSubtarget.Generic
-                        };
+                        case "etc":
+                        case "etc1":
+                            EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ETC;
+                            break;
+                        case "astc":
+                            EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
+                            break;
+                        case "etc2":
+                            EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ETC2;
+                            break;
                     }
                 }
                 // iOS/tvOS have no project-wide texture subtarget switch (unlike Android);
                 // compression is set per texture via the TextureImporter overrides applied below.
 
                 // Apply platform overrides to individual textures under path
+                int scanned = 0;
                 int updatedCount = 0;
+                var failedPaths = new List<string>();
                 if (!string.IsNullOrEmpty(path))
                 {
                     string safePath = AssetPathUtility.SanitizeAssetPath(path);
                     if (safePath == null)
                         return new ErrorResponse("INVALID_PATH", $"Invalid path '{path}'.");
 
+                    TextureImporterFormat? targetFormat = null;
+                    if (!string.IsNullOrEmpty(format))
+                    {
+                        targetFormat = ResolveTextureFormat(format);
+                        if (!targetFormat.HasValue)
+                            return new ErrorResponse("INVALID_FORMAT",
+                                $"Unknown texture format '{format}'. Use a family name (ASTC, ETC2, PVRTC, DXT5) "
+                                + "or an exact TextureImporterFormat member such as ASTC_4x4 or ETC2_RGBA8.");
+                    }
+
                     string[] textureGuids = AssetDatabase.FindAssets("t:Texture2D", new[] { safePath });
+                    scanned = textureGuids.Length;
                     foreach (string guid in textureGuids)
                     {
                         string assetPath = AssetDatabase.GUIDToAssetPath(guid);
                         var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
                         if (importer == null) continue;
 
-                        var platformSettings = importer.GetPlatformTextureSettings(platform);
-                        if (!string.IsNullOrEmpty(format))
-                        {
-                            platformSettings.overridden = true;
-                            platformSettings.format = TryParseTextureFormat(format, platformLower);
-                        }
-                        else
-                        {
-                            platformSettings.overridden = true;
-                        }
+                        var platformSettings = importer.GetPlatformTextureSettings(importerPlatform);
+                        platformSettings.overridden = true;
+                        if (targetFormat.HasValue)
+                            platformSettings.format = targetFormat.Value;
 
                         importer.SetPlatformTextureSettings(platformSettings);
-                        updatedCount++;
-                    }
+                        // SetPlatformTextureSettings only mutates the in-memory importer. Without
+                        // SaveAndReimport the change never reaches the .meta file, so it is lost on
+                        // the next domain reload and never reaches version control — while
+                        // GetPlatformTextureSettings still reads it back, which is why this looked
+                        // like it worked.
+                        importer.SaveAndReimport();
 
-                    if (updatedCount > 0)
-                        AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                        var applied = ((TextureImporter)AssetImporter.GetAtPath(assetPath))
+                            .GetPlatformTextureSettings(importerPlatform);
+                        if (applied.overridden && (!targetFormat.HasValue || applied.format == targetFormat.Value))
+                            updatedCount++;
+                        else
+                            failedPaths.Add(assetPath);
+                    }
                 }
+
+                if (failedPaths.Count > 0)
+                    return new ErrorResponse("COMPRESSION_NOT_APPLIED",
+                        $"{failedPaths.Count} of {scanned} texture(s) did not accept the '{importerPlatform}' override.",
+                        new { platform, importerPlatform, texturesUpdated = updatedCount, failedPaths = failedPaths.Take(20).ToList() });
 
                 return new SuccessResponse(
                     $"Texture compression configured for '{platform}'.",
                     new
                     {
                         platform,
+                        importerPlatform,
                         format = format ?? "default",
+                        texturesScanned = scanned,
                         texturesUpdated = updatedCount
                     });
             }
@@ -292,28 +348,24 @@ namespace MCPForUnity.Editor.Tools
         }
 
         /// <summary>
-        /// Attempts to parse a texture format string into a TextureImporterFormat.
-        /// Falls back to Automatic (platform default) on failure.
+        /// Resolves a texture format name to a concrete <see cref="TextureImporterFormat"/>.
+        /// Accepts exact enum members, plus the four family names the tool schema offers —
+        /// ASTC, ETC2 and PVRTC name compression families, not members, so each maps to the
+        /// block size that is the sensible mobile default. Returns null when unrecognised;
+        /// falling back to Automatic would silently ignore the caller's request.
         /// </summary>
-        private static TextureImporterFormat TryParseTextureFormat(string format, string platform)
+        private static TextureImporterFormat? ResolveTextureFormat(string format)
         {
-            if (string.IsNullOrEmpty(format))
-                return TextureImporterFormat.Automatic;
+            switch (format.ToLowerInvariant())
+            {
+                case "astc": return TextureImporterFormat.ASTC_6x6;
+                case "etc2": return TextureImporterFormat.ETC2_RGBA8;
+                case "pvrtc": return TextureImporterFormat.PVRTC_RGBA4;
+            }
 
-            try
-            {
-                return (TextureImporterFormat)Enum.Parse(typeof(TextureImporterFormat), format, ignoreCase: true);
-            }
-            catch
-            {
-                // Fallback to platform-specific defaults
-                return platform switch
-                {
-                    "android" => TextureImporterFormat.Automatic,
-                    "ios" or "iphone" => TextureImporterFormat.Automatic,
-                    _ => TextureImporterFormat.Automatic
-                };
-            }
+            return Enum.TryParse(format, ignoreCase: true, out TextureImporterFormat parsed)
+                ? parsed
+                : (TextureImporterFormat?)null;
         }
 
         // ─────────────────────────────────────────────
@@ -344,12 +396,20 @@ namespace MCPForUnity.Editor.Tools
                 if (!maxWidth.HasValue && !maxHeight.HasValue)
                     return new ErrorResponse("Either 'maxWidth' or 'maxHeight' parameter is required.");
 
-                int targetMaxSize = Mathf.Max(maxWidth ?? 8192, maxHeight ?? 8192);
-                string searchFilter = "t:Texture2D";
-                if (!string.IsNullOrEmpty(filter))
-                    searchFilter = filter;
+                // maxTextureSize is a single cap on the longest edge, so the requested width and
+                // height must both be satisfied — that is the smaller of the two, not the larger.
+                int targetMaxSize = Mathf.Min(maxWidth ?? int.MaxValue, maxHeight ?? int.MaxValue);
 
-                string[] textureGuids = AssetDatabase.FindAssets(searchFilter, new[] { path });
+                FilterMode? filterMode = null;
+                if (!string.IsNullOrEmpty(filter))
+                {
+                    if (!Enum.TryParse(filter, ignoreCase: true, out FilterMode parsedFilter))
+                        return new ErrorResponse("INVALID_FILTER",
+                            $"Unknown filter '{filter}'. Valid values: Point, Bilinear, Trilinear.");
+                    filterMode = parsedFilter;
+                }
+
+                string[] textureGuids = AssetDatabase.FindAssets("t:Texture2D", new[] { path });
                 var modifiedPaths = new List<string>();
 
                 foreach (string guid in textureGuids)
@@ -358,10 +418,21 @@ namespace MCPForUnity.Editor.Tools
                     var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
                     if (importer == null) continue;
 
-                    // Only modify if current size is larger than target
+                    bool changed = false;
+                    // Only shrink; never upscale a texture that is already within budget.
                     if (importer.maxTextureSize > targetMaxSize)
                     {
                         importer.maxTextureSize = targetMaxSize;
+                        changed = true;
+                    }
+                    if (filterMode.HasValue && importer.filterMode != filterMode.Value)
+                    {
+                        importer.filterMode = filterMode.Value;
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
                         importer.SaveAndReimport();
                         modifiedPaths.Add(assetPath);
                     }
@@ -372,11 +443,15 @@ namespace MCPForUnity.Editor.Tools
                     AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
                 return new SuccessResponse(
-                    $"Resized {modifiedPaths.Count} texture(s) to max dimension {targetMaxSize}.",
+                    $"Updated {modifiedPaths.Count} of {textureGuids.Length} texture(s) under '{path}'.",
                     new
                     {
                         maxSize = targetMaxSize,
+                        filterMode = filterMode?.ToString(),
+                        texturesScanned = textureGuids.Length,
                         texturesResized = modifiedPaths.Count,
+                        modifiedPaths = modifiedPaths.Take(50).ToList(),
+                        modifiedPathsTruncated = modifiedPaths.Count > 50,
                         path
                     });
             }

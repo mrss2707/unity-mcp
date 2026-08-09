@@ -26,7 +26,7 @@ TOOL_GROUPS: dict[str, str] = {
     "probuilder": "ProBuilder 3D modeling – requires com.unity.probuilder package",
     "profiling": "Unity Profiler session control, counters, memory snapshots & Frame Debugger",
     "asset_gen": "AI asset generation – 3D model gen/import, 2D image gen & audio gen (bring-your-own-key)",
-    "input_system": "Unity Input System — quản lý InputActionAsset, binding, control scheme",
+    "input_system": "Unity Input System — InputActionAsset, binding, and control scheme management",
 }
 
 DEFAULT_ENABLED_GROUPS: set[str] = {"core"}

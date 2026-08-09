@@ -4,7 +4,7 @@ import styles from './styles.module.css';
 
 export default function HomeStats() {
   const { siteConfig } = useDocusaurusContext();
-  const toolCount = siteConfig.customFields?.toolCount ?? 47;
+  const toolCount = siteConfig.customFields?.toolCount ?? 52;
   const resourceCount = siteConfig.customFields?.resourceCount ?? 25;
   const clientCount = siteConfig.customFields?.supportedClientCount ?? 0;
 

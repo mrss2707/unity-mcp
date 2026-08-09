@@ -58,8 +58,8 @@ function getFeatures(toolCount, toolGroupCount) {
 
 export default function HomeFeatures() {
   const { siteConfig } = useDocusaurusContext();
-  const toolCount = siteConfig.customFields?.toolCount ?? 47;
-  const toolGroupCount = siteConfig.customFields?.toolGroupCount ?? 10;
+  const toolCount = siteConfig.customFields?.toolCount ?? 52;
+  const toolGroupCount = siteConfig.customFields?.toolGroupCount ?? 11;
   const features = getFeatures(toolCount, toolGroupCount);
 
   return (

@@ -10,8 +10,8 @@ against a live Editor; the version(s) are named).
 
 ## How to reproduce
 
-Two gates. Run both before touching anything else — between them they found 8 of the bugs below,
-including three that manual review missed entirely.
+Three gates. Run all before touching anything else — between them they found 8 of the bugs below,
+including three that manual review missed entirely, and the headless Test Runner regressions in §7.
 
 ```bash
 # Gate 1 — Python↔C# parameter contract
@@ -19,6 +19,9 @@ cd Server && uv run pytest tests/test_python_csharp_contract.py -q
 
 # Gate 2 — compile across the supported Unity range
 tools/check-unity-versions.sh
+
+# Gate 3 — headless bridge + Unity Test Runner lifecycle
+cd Server && uv run python ../tools/local_harness.py --legs smoke,editmode,playmode
 ```
 
 Gate 1 is green today because the contract breaks below are listed in its `KNOWN_IGNORED` /
@@ -27,7 +30,9 @@ fix it. Adding an entry to silence a failure means a newly broken tool — don't
 
 Live loop (see the two local projects in the team notes): edit C# → `refresh_unity` → probe both
 Editors via `POST http://127.0.0.1:8090/api/command` with `unity_instance` set. Editing Python
-requires a server restart; editing C# does not.
+requires a server restart; editing C# does not. For `tools/local_harness.py`, run through the Server
+`uv` environment (`cd Server && uv run python ../tools/local_harness.py …`); system `python3` lacks the
+Server dependencies such as `pydantic`.
 
 ---
 
@@ -209,9 +214,9 @@ The worst class for an agent: it believes the work is done.
 
 | Location | Problem | Status |
 |---|---|---|
-| `FindInFile.cs` `find_references` | Reads every `.cs` in scope in full, no cap; the Python `max_results` is never forwarded. Substring match, so `Player` hits `PlayerController`, comments, string literals. | open |
+| `FindInFile.cs` `find_references` | Read every `.cs` in scope in full, no cap; the Python `max_results` was never forwarded. Substring match, so `Player` hit `PlayerController`, comments, string literals. Now applies `maxResults`, paginates with `cursor`/`pageSize`, uses symbol boundaries, and strips comments/strings before matching. | **verified** (6000 harness) |
 | `ManageInputSystem.cs` `get_asset` | Returns the whole `.inputactions` JSON inline — ~15k tokens for Unity's stock asset. | open |
-| `ManageComponents.cs` `list_all` | Unpaged; also reads `includeInactive` and never uses it. | open |
+| `ManageComponents.cs` `list_all` | Was unpaged; also read `includeInactive` and never used it. Now accepts inactive targets and pages component rows. | **verified** (6000 harness) |
 
 ---
 
@@ -219,18 +224,43 @@ The worst class for an agent: it believes the work is done.
 
 | Item | Problem | Status |
 |---|---|---|
-| Target resolution | New code uses `GameObject.Find(path)` in ~10 sites — cannot see inactive objects, and bypasses the existing `target` + `search_method` resolution. `manage_components` now has two different targeting schemes depending on the action. | open |
-| Build report | Three implementations: `ManageBuild.get_build_report`, `ManageOptimization.analyze_build_size`, `ManageEditor.generate_report(build_size)`. | open |
-| Undo | New mutations skip `Undo.RecordObject`/`Undo.AddComponent`, while `manage_editor` gained `undo`/`redo` actions. | open |
-| Preflight | `manage_audio`/`optimization`/`addressables` gate on it; `manage_input_system` and `find_in_file` do not, despite writing assets. | open |
-| `manage_addressables` `build_content` | Comment claims a long-running-job dispatch; the code is identical to the default branch and will time out. | open |
-| CLI commands | Step 2 of CLAUDE.md § *Adding a New Tool* skipped for all 4 new tools. | open |
-| `tool_registry.py:29` | `input_system` group description is in Vietnamese; the other 10 are English, and it is shown to the agent. | open |
-| `tools/test_game_creation.py` | `assert_ok` returns a bool that every call site discards — the script always "passes". Docstring points at `Server/tests/manual/`, file lives in `tools/`. Covers none of the 4 new tools. | open |
+| Target resolution | New code uses `GameObject.Find(path)` in ~10 sites — cannot see inactive objects, and bypasses the existing `target` + `search_method` resolution. `manage_components` now has two different targeting schemes depending on the action. | **fixed** — shared composite resolver now covers audited audio/camera/graphics/profiler/component call sites; remaining `GameObject.Find` hits are internal implementation or static analysis text. |
+| Build report | Three implementations: `ManageBuild.get_build_report`, `ManageOptimization.analyze_build_size`, `ManageEditor.generate_report(build_size)`. | **fixed** — `ManageOptimization.analyze_build_size` now uses `BuildReportCompat.GetFiles`; build/editor callers already used it. |
+| Undo | New mutations skip `Undo.RecordObject`/`Undo.AddComponent`, while `manage_editor` gained `undo`/`redo` actions. | **partially fixed** — listener add/remove now records Undo before serialized UnityEvent mutations; broader Addressables/settings Undo remains best-effort dirty/save. |
+| Preflight | `manage_audio`/`optimization`/`addressables` gate on it; `manage_input_system` and `find_in_file` do not, despite writing assets. | **fixed** — `manage_input_system` mutations and `find_in_file` scans now run compile-ready preflight; read-only paths bypass it. |
+| `manage_addressables` `build_content` | Comment claims a long-running-job dispatch; the code is identical to the default branch and will time out. | **fixed** — Python exposes `status`, C# queues via `EditorApplication.update`, stores queued/running/terminal timestamps, and times out stale jobs. |
+| CLI commands | Step 2 of CLAUDE.md § *Adding a New Tool* skipped for all 4 new tools. | **fixed** — added Addressables, Input System, Optimization, and Find-in-file CLI groups plus build extended wrappers. |
+| `tool_registry.py:29` | `input_system` group description is in Vietnamese; the other 10 are English, and it is shown to the agent. | **fixed** |
+| `tools/test_game_creation.py` | `assert_ok` returns a bool that every call site discards — the script always "passes". Docstring points at `Server/tests/manual/`, file lives in `tools/`. Covers none of the 4 new tools. | **fixed** — `assert_ok` raises, docstring/path are current, and stale `find_gameobjects` payload was corrected. |
 | Python unit tests | The 11 new test files mock the transport and assert only that Python built the right dict, so no contract drift is observable. Gate 1 exists to cover this. | **fixed** (gate added) |
-| CLAUDE.md | `p.GetInt("page_size", "pageSize")` example is stale — the second argument is `int? defaultValue`, not an alternate key. | open |
-| `ManageAnimation.cs` `list_model_clips` | `LoadAllAssetsAtPath` called inside the loop — O(n²). | open |
-| `ManageEditor.cs` | Default-case error message never listed the 3 new actions. | open |
+| CLAUDE.md | `p.GetInt("page_size", "pageSize")` example is stale — the second argument is `int? defaultValue`, not an alternate key. | **fixed** |
+| `ManageAnimation.cs` `list_model_clips` | `LoadAllAssetsAtPath` called inside the loop — O(n²). | **fixed** |
+| `ManageEditor.cs` | Default-case error message never listed the 3 new actions. | **fixed** |
+
+---
+
+## 7. Headless Test Runner lifecycle
+
+The local harness exposed three separate failure modes that looked identical until the Editor log was
+kept with `--status-dir`.
+
+| Problem | Evidence | Status |
+|---|---|---|
+| EditMode `run_tests` defaulted to the C# 15s init timeout while PlayMode explicitly passed 120s. On backgrounded Unity, full EditMode discovery can legitimately take longer before `RunStarted`. | `reports/junit-editmode.xml` initially showed `Test job failed to initialize (tests did not start within timeout)` while smoke passed. `tools/local_harness.py` now has `--editmode-init-timeout` (default 120000) and passes it to the EditMode leg. | **verified** (6000 harness) |
+| `TestRunnerNoThrottle` was applied preemptively only for PlayMode. If Unity was unfocused, EditMode could stall before callbacks fired, so waiting until `RunStarted` to disable throttling was too late. | After applying no-throttle before `Execute()` for both modes, the log reached `RunStarted` instead of timing out at initialization. | **verified** (6000 harness) |
+| Dirty unsaved `Untitled` scenes triggered Unity Test Framework's `SaveModifiedSceneTask`, which opens a save dialog in batch/headless and prevents `RunStarted`. | `editor.log` contained `Canceling DisplayDialog: Scene(s) Have Been Modified ... Untitled`. `TestRunnerService.SaveDirtyScenesIfNeeded` now auto-saves unsaved dirty scenes under ignored `Assets/Temp/MCPForUnity/TestRunnerScenes` before invoking TestRunner. | **verified** (6000 harness) |
+| A new audit test created/imported a `.cs` file under `Assets/Temp` during EditMode. That requested script compilation/domain reload mid-suite, so the harness wedged with no terminal status even after `RunStarted`. | `editor.log` showed `[ScriptCompilation] Requested script compilation because: AssetDatabase observed changes in script compilation related files` during the run. The test now scans an existing script instead of generating one. | **verified** (6000 harness) |
+
+Final 6000.5.3f1 harness evidence after the fixes:
+
+```text
+smoke:    9/9 passed
+editmode: 1113/1177 EditMode tests passed, exit 0
+playmode: 5/5 PlayMode tests passed, exit 0
+```
+
+Python harness parser coverage also passed: `cd Server && uv run pytest ../tools/tests/test_local_harness.py -q`
+reported `69 passed`.
 
 ---
 

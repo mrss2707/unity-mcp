@@ -237,14 +237,10 @@ namespace MCPForUnity.Editor.Services
                 // (Issue #525: EditMode tests were blocked by save dialog)
                 SaveDirtyScenesIfNeeded();
 
-                // Apply no-throttling preemptively for PlayMode tests. This ensures Unity
-                // isn't throttled during the Play mode transition (which requires multiple
-                // editor frames). Without this, unfocused Unity may never reach RunStarted
-                // where throttling would normally be disabled.
-                if (mode == TestMode.PlayMode)
-                {
-                    TestRunnerNoThrottle.ApplyNoThrottlingPreemptive();
-                }
+                // Apply no-throttling preemptively before Execute(). In backgrounded batchmode,
+                // both EditMode discovery and PlayMode transitions can stall before RunStarted,
+                // where callbacks would normally disable throttling.
+                TestRunnerNoThrottle.ApplyNoThrottlingPreemptive();
 
                 _testRunnerApi.Execute(settings);
 
@@ -482,22 +478,55 @@ namespace MCPForUnity.Editor.Services
             for (int i = 0; i < sceneCount; i++)
             {
                 var scene = SceneManager.GetSceneAt(i);
-                if (scene.isDirty)
+                if (!scene.isDirty)
                 {
-                    if (string.IsNullOrEmpty(scene.path))
-                    {
-                        McpLog.Warn($"[TestRunnerService] Skipping unsaved scene '{scene.name}': save it manually before running tests.");
-                        continue;
-                    }
-                    try
-                    {
-                        EditorSceneManager.SaveScene(scene);
-                    }
-                    catch (Exception ex)
-                    {
-                        McpLog.Warn($"[TestRunnerService] Failed to save dirty scene '{scene.name}': {ex.Message}");
-                    }
+                    continue;
                 }
+
+                try
+                {
+                    string savePath = scene.path;
+                    if (string.IsNullOrEmpty(savePath))
+                    {
+                        savePath = CreateTemporaryScenePath(scene);
+                        McpLog.Warn($"[TestRunnerService] Auto-saving unsaved scene '{scene.name}' to '{savePath}' before running tests.");
+                    }
+
+                    EditorSceneManager.SaveScene(scene, savePath);
+                }
+                catch (Exception ex)
+                {
+                    McpLog.Warn($"[TestRunnerService] Failed to save dirty scene '{scene.name}': {ex.Message}");
+                }
+            }
+        }
+
+        private static string CreateTemporaryScenePath(Scene scene)
+        {
+            const string folder = "Assets/Temp/MCPForUnity/TestRunnerScenes";
+            EnsureAssetFolder(folder);
+
+            string sceneName = string.IsNullOrWhiteSpace(scene.name) ? "Untitled" : scene.name;
+            foreach (var invalid in Path.GetInvalidFileNameChars())
+            {
+                sceneName = sceneName.Replace(invalid, '_');
+            }
+
+            return AssetDatabase.GenerateUniqueAssetPath($"{folder}/{sceneName}.unity");
+        }
+
+        private static void EnsureAssetFolder(string folder)
+        {
+            string[] parts = folder.Split('/');
+            string current = parts[0];
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string next = $"{current}/{parts[i]}";
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(current, parts[i]);
+                }
+                current = next;
             }
         }
 

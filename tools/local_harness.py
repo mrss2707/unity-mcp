@@ -92,8 +92,9 @@ SOCKET_RELEASE_MS = 2000
 # boot (matches claude-nl-suite.yml fatal_after = boot_start + 120 s).
 LICENSE_GRACE_S = 120
 
-# PlayMode init-timeout (ms). C# default is 15000; 120000 is only a docstring
-# recommendation, so the harness passes it explicitly.
+# UTF init-timeout (ms). C# default is 15000; 120000 is only a docstring
+# recommendation, so the harness passes it explicitly for backgrounded runs.
+DEFAULT_EDITMODE_INIT_TIMEOUT_MS = 120000
 DEFAULT_PLAYMODE_INIT_TIMEOUT_MS = 120000
 
 
@@ -684,6 +685,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--reports", default=None, help="Reports directory. Default: dirname(--junit) or reports/.")
     p.add_argument("--boot-timeout", type=int, default=900, help="Warm-up + resident-boot budget (s).")
     p.add_argument("--bridge-wait", type=int, default=600, help="Bridge-ready budget (s).")
+    p.add_argument(
+        "--editmode-init-timeout",
+        type=int,
+        default=DEFAULT_EDITMODE_INIT_TIMEOUT_MS,
+        help="initTimeout (ms) passed verbatim to EditMode run_tests.",
+    )
     p.add_argument(
         "--playmode-init-timeout",
         type=int,
@@ -1536,7 +1543,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 outcomes.append(run_utf_leg("EditMode", instance_id, blocking=True,
                                             deadline=deadline, max_retries=args.max_retries,
-                                            retry_ms=args.retry_ms))
+                                            retry_ms=args.retry_ms,
+                                            init_timeout_ms=args.editmode_init_timeout))
 
         # --- PlayMode leg (default-ON, NON-BLOCKING unless --strict-playmode) ---
         if "playmode" in legs:

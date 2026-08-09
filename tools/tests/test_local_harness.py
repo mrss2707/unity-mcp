@@ -644,6 +644,7 @@ class TestBuildArgParser:
         assert ns.keep_alive is False
         assert ns.no_warmup is False
         assert ns.strict_playmode is False
+        assert ns.editmode_init_timeout == lh.DEFAULT_EDITMODE_INIT_TIMEOUT_MS
         assert ns.playmode_init_timeout == lh.DEFAULT_PLAYMODE_INIT_TIMEOUT_MS
         assert ns.editor_args == []
 
@@ -675,11 +676,17 @@ class TestBuildArgParser:
     def test_numeric_args_are_typed(self):
         parser = build_arg_parser()
         ns = parser.parse_args(
-            ["--boot-timeout", "1200", "--bridge-wait", "300", "--playmode-init-timeout", "60000"]
+            [
+                "--boot-timeout", "1200",
+                "--bridge-wait", "300",
+                "--editmode-init-timeout", "90000",
+                "--playmode-init-timeout", "60000",
+            ]
         )
         assert ns.boot_timeout == 1200
         assert isinstance(ns.boot_timeout, int)
         assert ns.bridge_wait == 300
+        assert ns.editmode_init_timeout == 90000
         assert ns.playmode_init_timeout == 60000
 
 

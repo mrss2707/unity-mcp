@@ -8,7 +8,7 @@ description: How to run Python and Unity tests locally, what CI runs, and how to
 
 # Testing
 
-Three test suites cover MCP for Unity: Python unit tests, Unity EditMode/PlayMode tests, and a multi-version Unity compile matrix. CI runs all three; you should run the two relevant to your change locally before pushing.
+Three test suites cover MCP for Unity: Python unit tests, Unity EditMode tests across the Unity matrix, and PlayMode/E2E smoke coverage on the bridge harness. Run the two relevant to your change locally before pushing.
 
 ## Python tests
 
@@ -40,7 +40,7 @@ Location: `TestProjects/UnityMCPTests/Assets/Tests/`
 
 To run locally, open `TestProjects/UnityMCPTests` in Unity, then **Window → General → Test Runner**.
 
-CI runs both modes across a multi-Unity matrix via `.github/workflows/unity-tests.yml`.
+CI runs EditMode across the multi-Unity matrix via `.github/workflows/unity-tests.yml`; PlayMode coverage runs through the E2E bridge harness on a single host.
 
 ### Local headless test harness
 
@@ -75,6 +75,7 @@ This is the most common pre-push surprise: code that builds on your Unity versio
 ```bash
 tools/check-unity-versions.sh           # compile-only across installed Unity Hub editors
 tools/check-unity-versions.sh --full    # full EditMode test run on each version
+tools/check-unity-versions.sh --require-run  # fail if every requested version is skipped
 ```
 
 The matrix is `tools/unity-versions.json`. The script discovers Unity installations via Unity Hub's standard locations on macOS, Windows, and Linux.
@@ -109,7 +110,7 @@ These are not part of CI; run them when you change transport, middleware, or hot
 | Workflow | Trigger | Duration | What it asserts |
 |---|---|---|---|
 | `python-tests.yml` | `Server/**` changes | ~2 min | `pytest` clean, coverage uploaded |
-| `unity-tests.yml` | `MCPForUnity/**` / `TestProjects/**` changes | ~15 min × N versions | EditMode + PlayMode tests clean across the matrix |
+| `unity-tests.yml` | `MCPForUnity/**` / `TestProjects/**` changes | ~15 min × N versions | EditMode tests clean across the matrix |
 | `docs-deploy.yml` | `website/**`, `docs/**`, tool/resource registry changes | ~1 min (build) | Docusaurus build succeeds; on push to `beta`, deploys to GitHub Pages |
 | `docs-generate.yml` | same triggers as docs-deploy | ~1 min | Reference docs are not stale; decorator count matches MD count |
 

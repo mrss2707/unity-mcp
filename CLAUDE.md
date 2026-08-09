@@ -122,8 +122,8 @@ Async handlers use `EditorApplication.update` polling with `TaskCompletionSource
 Use `ToolParams` for consistent parameter validation:
 ```csharp
 var p = new ToolParams(parameters);
-var pageSize = p.GetInt("page_size", "pageSize") ?? 50;
-var name = p.RequireString("name");
+var pageSize = p.GetInt("page_size") ?? 50; // ToolParams also accepts pageSize
+var name = p.GetRequired("name").Value;
 ```
 
 ### C# Resources
@@ -131,8 +131,8 @@ Resources use `[McpForUnityResource]` and follow the same `HandleCommand` patter
 
 ### Paging Large Results
 Always page results that could be large (hierarchies, components, search results):
-- Use `page_size` and `cursor` parameters
-- Return `next_cursor` when more results exist
+- Read `page_size`/`pageSize` and `cursor` with `PaginationRequest.FromParams`
+- Return `nextCursor`, `totalCount`, `pageSize`, and `hasMore` when more results exist
 
 ### Composing Tools Internally (C#)
 Use `CommandRegistry.InvokeCommandAsync` to call other tools from within a handler:

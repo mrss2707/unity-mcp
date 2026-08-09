@@ -18,10 +18,15 @@ Controls and queries the Unity editor's state and settings. Read-only actions: t
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `action` | `Literal['telemetry_status', 'telemetry_ping', 'play', 'pause', 'stop', 'set_active_tool', 'add_tag', 'remove_tag', 'add_layer', 'remove_layer', 'deploy_package', 'restore_package', 'undo', 'redo']` | yes | Get and update the Unity Editor state. deploy_package copies the configured MCPForUnity source into the project's package location (triggers recompile). restore_package reverts the last deployment from backup. undo/redo perform editor undo/redo. For prefab editing (open/save/close prefab stage), use manage_prefabs. |
+| `action` | `Literal['telemetry_status', 'telemetry_ping', 'play', 'pause', 'stop', 'set_active_tool', 'add_tag', 'remove_tag', 'add_layer', 'remove_layer', 'deploy_package', 'restore_package', 'undo', 'redo', 'create_folder_structure', 'run_health_check', 'generate_report']` | yes | Get and update the Unity Editor state. deploy_package copies the configured MCPForUnity source into the project's package location (triggers recompile). restore_package reverts the last deployment from backup. undo/redo perform editor undo/redo. create_folder_structure creates standard Unity folder hierarchy. run_health_check runs project health diagnostics. generate_report generates project reports. For prefab editing (open/save/close prefab stage), use manage_prefabs. |
 | `tool_name` | `str \| None` | — | Tool name when setting active tool |
 | `tag_name` | `str \| None` | — | Tag name when adding and removing tags |
 | `layer_name` | `str \| None` | — | Layer name when adding and removing layers |
+| `structure` | `Literal['default', 'urp', 'hdrp', 'custom'] \| None` | — | Folder structure preset for create_folder_structure. |
+| `rootPath` | `str \| None` | — | Root path for create_folder_structure (must be within Assets/). |
+| `checks` | `list[Literal['compile', 'prefab', 'missing_ref', 'texture_size']] \| None` | — | Health checks to run for run_health_check. |
+| `reportType` | `Literal['build_size', 'asset_usage', 'performance'] \| None` | — | Report type for generate_report. |
+| `folders` | `list[str] \| None` | — | Custom folder list for create_folder_structure with structure='custom'. |
 
 ## Returns
 

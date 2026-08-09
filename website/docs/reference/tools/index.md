@@ -24,7 +24,7 @@ AI asset generation – 3D model gen/import, 2D image gen & audio gen (bring-you
 - **[`import_model`](./asset_gen/import_model.md)** — Import 3D models from the Sketchfab marketplace into the Unity project.
 - **[`import_model_file`](./asset_gen/import_model_file.md)** — Import a local 3D model file that already exists on disk (e.g. an FBX/OBJ/glTF exported from Blender or another DCC tool) into the Unity project.
 
-## `core` &nbsp; (30 tools)
+## `core` &nbsp; (33 tools)
 Essential scene, script, asset & editor tools (always on by default)
 - **[`apply_text_edits`](./core/apply_text_edits.md)** — Apply small text edits to a C# script identified by URI.
 - **[`batch_execute`](./core/batch_execute.md)** — Executes multiple MCP commands in a single batch for dramatically better performance.
@@ -36,7 +36,9 @@ Essential scene, script, asset & editor tools (always on by default)
 - **[`find_gameobjects`](./core/find_gameobjects.md)** — Search for GameObjects in the scene by name, tag, layer, component type, or path.
 - **[`find_in_file`](./core/find_in_file.md)** — Searches a file with a regex pattern and returns line numbers and excerpts.
 - **[`get_sha`](./core/get_sha.md)** — Get SHA256 and basic metadata for a Unity C# script without returning file contents.
+- **[`manage_addressables`](./core/manage_addressables.md)** — Manage Unity Addressables — create groups, assign assets, build content, inspect dependency chains
 - **[`manage_asset`](./core/manage_asset.md)** — Performs asset operations (import, create, modify, delete, etc.) in Unity.
+- **[`manage_audio`](./core/manage_audio.md)** — Manage Unity Audio — create and configure AudioSources, Audio Mixers, mixer snapshots, and 3D spatial audio settings
 - **[`manage_build`](./core/manage_build.md)** — Manage Unity player builds — trigger builds, switch platforms, configure settings, manage build scenes and profiles, run batch builds across platforms.
 - **[`manage_camera`](./core/manage_camera.md)** — Manage cameras (Unity Camera + Cinemachine).
 - **[`manage_components`](./core/manage_components.md)** — Add, remove, or set properties on components attached to GameObjects.
@@ -44,6 +46,7 @@ Essential scene, script, asset & editor tools (always on by default)
 - **[`manage_gameobject`](./core/manage_gameobject.md)** — Performs CRUD operations on GameObjects.
 - **[`manage_graphics`](./core/manage_graphics.md)** — Manage rendering graphics: volumes, post-processing, light baking, rendering stats, pipeline settings, and URP renderer features.
 - **[`manage_material`](./core/manage_material.md)** — Manages Unity materials (set properties, colors, shaders, etc).
+- **[`manage_optimization`](./core/manage_optimization.md)** — Manage Cross-platform Optimization — quality settings, texture compression, sprite atlases, lightmaps, occlusion culling, build size analysis
 - **[`manage_packages`](./core/manage_packages.md)** — Manage Unity packages: query, install, remove, embed, and configure registries.
 - **[`manage_physics`](./core/manage_physics.md)** — Manage physics settings, collision matrix, materials, joints, queries, and validation.
 - **[`manage_prefabs`](./core/manage_prefabs.md)** — Manages Unity Prefab assets.
@@ -61,6 +64,10 @@ Essential scene, script, asset & editor tools (always on by default)
 Unity API reflection and documentation lookup
 - **[`unity_docs`](./docs/unity_docs.md)** — Fetch official Unity documentation from docs.unity3d.com.
 - **[`unity_reflect`](./docs/unity_reflect.md)** — Inspect Unity's live C# API via reflection.
+
+## `input_system` &nbsp; (1 tool)
+Unity Input System — InputActionAsset, binding, and control scheme management
+- **[`manage_input_system`](./input_system/manage_input_system.md)** — Manage Unity Input System Action Assets — create, read, and modify InputActionAssets with action maps, bindings, control schemes, and composite bindings.
 
 ## `probuilder` &nbsp; (1 tool)
 ProBuilder 3D modeling – requires com.unity.probuilder package

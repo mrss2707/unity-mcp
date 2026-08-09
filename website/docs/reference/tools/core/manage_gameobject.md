@@ -12,13 +12,13 @@ description: "Performs CRUD operations on GameObjects."
 
 ## Description
 
-Performs CRUD operations on GameObjects. Actions: create, modify, delete, duplicate, move_relative, look_at. NOT for searching — use the find_gameobjects tool to search by name/tag/layer/component/path. NOT for component management — use the manage_components tool (add/remove/set_property) or mcpforunity://scene/gameobject/{id}/components resource (read).
+Performs CRUD operations on GameObjects. Actions: create, modify, delete, duplicate, move_relative, look_at, set_sibling_index, get_detailed_info. NOT for searching — use the find_gameobjects tool to search by name/tag/layer/component/path. NOT for component management — use the manage_components tool (add/remove/set_property) or mcpforunity://scene/gameobject/{id}/components resource (read).
 
 ## Parameters
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `action` | `Literal['create', 'modify', 'delete', 'duplicate', 'move_relative', 'look_at'] \| None` | — | Action to perform on GameObject. |
+| `action` | `Literal['create', 'modify', 'delete', 'duplicate', 'move_relative', 'look_at', 'set_sibling_index', 'get_detailed_info'] \| None` | — | Action to perform on GameObject. |
 | `target` | `str \| None` | — | GameObject identifier by name, path, or instance ID for modify/delete/duplicate actions |
 | `search_method` | `Literal['by_id', 'by_name', 'by_path', 'by_tag', 'by_layer', 'by_component'] \| None` | — | How to resolve 'target'. If omitted, Unity infers: instance ID -> by_id, path (contains '/') -> by_path, otherwise by_name. |
 | `name` | `str \| None` | — | GameObject name for 'create' (initial name) and 'modify' (rename) actions. |
@@ -45,6 +45,11 @@ Performs CRUD operations on GameObjects. Actions: create, modify, delete, duplic
 | `world_space` | `bool \| str \| None` | — | If True (default), use world space directions; if False, use reference object's local directions |
 | `look_at_target` | `list[float] \| str \| None` | — | World position [x,y,z] or GameObject name/path/ID to look at (for look_at action). |
 | `look_at_up` | `list[float] \| str \| None` | — | Optional up vector [x,y,z] for look_at. Defaults to [0,1,0]. |
+| `gameObjectPath` | `str \| None` | — | Path to the target GameObject. |
+| `index` | `int \| None` | — | Target sibling index for reordering. |
+| `includeInactive` | `bool \| str \| None` | — | Include inactive children in detailed info (accepts true/false or 'true'/'false'). |
+| `componentFilter` | `list[str] \| None` | — | Filter components by name (case-insensitive substring match). |
+| `maxChildren` | `int \| None` | — | Max children to return (default: 50). |
 
 ## Returns
 

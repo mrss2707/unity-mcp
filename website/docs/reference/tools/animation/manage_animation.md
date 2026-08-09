@@ -12,7 +12,7 @@ description: "Manage Unity animation: Animator control and AnimationClip creatio
 
 ## Description
 
-Manage Unity animation: Animator control and AnimationClip creation. Action prefixes: animator_* (play, crossfade, set parameters, get info), controller_* (create AnimatorControllers, add states/transitions/parameters), clip_* (create clips, add keyframe curves, assign to GameObjects). Action-specific parameters go in `properties` (keys match ManageAnimation.cs).
+Manage Unity animation: Animator control and AnimationClip creation. Action prefixes: animator_* (play, crossfade, set parameters, get info), controller_* (create AnimatorControllers, add states/transitions/parameters), clip_* (create clips, add keyframe curves, assign to GameObjects), list_model_clips (list animation clips embedded in an imported model). Action-specific parameters go in `properties` (keys match ManageAnimation.cs).
 
 ## Parameters
 
@@ -24,6 +24,7 @@ Manage Unity animation: Animator control and AnimationClip creation. Action pref
 | `clip_path` | `str \| None` | — | Asset path for AnimationClip (e.g. 'Assets/Animations/Walk.anim'). |
 | `controller_path` | `str \| None` | — | Asset path for AnimatorController (e.g. 'Assets/Animators/Player.controller'). |
 | `properties` | `dict[str, Any] \| str \| None` | — | Action-specific parameters (dict or JSON string). |
+| `modelPath` | `str \| None` | — | Asset path to a model (FBX/GLB) for list_model_clips. |
 
 ## Returns
 

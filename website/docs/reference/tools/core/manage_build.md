@@ -12,7 +12,7 @@ description: "Manage Unity player builds — trigger builds, switch platforms, c
 
 ## Description
 
-Manage Unity player builds — trigger builds, switch platforms, configure settings, manage build scenes and profiles, run batch builds across platforms. Actions: build, status, platform, settings, scenes, profiles, batch, cancel.
+Manage Unity player builds — trigger builds, switch platforms, configure settings, manage build scenes and profiles, run batch builds across platforms. Actions: build, status, platform, settings, scenes, profiles, batch, cancel, configure_code_generation, configure_aab, get_build_report.
 
 ## Parameters
 
@@ -34,6 +34,13 @@ Manage Unity player builds — trigger builds, switch platforms, configure setti
 | `profiles` | `str \| None` | — | JSON array of profile paths for batch build (Unity 6+) |
 | `output_dir` | `str \| None` | — | Base output directory for batch builds |
 | `job_id` | `str \| None` | — | Job ID for status/cancel |
+| `scriptingBackend` | `Literal['Mono', 'IL2CPP'] \| None` | — | Scripting backend for configure_code_generation. |
+| `strippingLevel` | `Literal['Disabled', 'Low', 'Medium', 'High'] \| None` | — | Managed stripping level for configure_code_generation. |
+| `compilerConfig` | `Literal['Debug', 'Release', 'Master'] \| None` | — | IL2CPP compiler configuration. |
+| `preserveAssemblies` | `list[str] \| None` | — | Assemblies to preserve from stripping (generates link.xml). |
+| `bundleVersionCode` | `int \| None` | — | Android bundle version code for configure_aab. |
+| `keystorePath` | `str \| None` | — | Path to keystore for configure_aab. Passwords are NOT parameters — set UNITY_ANDROID_KEYSTORE_PASS and UNITY_ANDROID_KEYALIAS_PASS in the Unity Editor's environment. |
+| `keyAlias` | `str \| None` | — | Key alias for configure_aab. Requires keystorePath. |
 
 ## Returns
 

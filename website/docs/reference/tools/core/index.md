@@ -18,7 +18,9 @@ Essential scene, script, asset & editor tools (always on by default)
 - **[`find_gameobjects`](./find_gameobjects.md)** — Search for GameObjects in the scene by name, tag, layer, component type, or path.
 - **[`find_in_file`](./find_in_file.md)** — Searches a file with a regex pattern and returns line numbers and excerpts.
 - **[`get_sha`](./get_sha.md)** — Get SHA256 and basic metadata for a Unity C# script without returning file contents.
+- **[`manage_addressables`](./manage_addressables.md)** — Manage Unity Addressables — create groups, assign assets, build content, inspect dependency chains
 - **[`manage_asset`](./manage_asset.md)** — Performs asset operations (import, create, modify, delete, etc.) in Unity.
+- **[`manage_audio`](./manage_audio.md)** — Manage Unity Audio — create and configure AudioSources, Audio Mixers, mixer snapshots, and 3D spatial audio settings
 - **[`manage_build`](./manage_build.md)** — Manage Unity player builds — trigger builds, switch platforms, configure settings, manage build scenes and profiles, run batch builds across platforms.
 - **[`manage_camera`](./manage_camera.md)** — Manage cameras (Unity Camera + Cinemachine).
 - **[`manage_components`](./manage_components.md)** — Add, remove, or set properties on components attached to GameObjects.
@@ -26,6 +28,7 @@ Essential scene, script, asset & editor tools (always on by default)
 - **[`manage_gameobject`](./manage_gameobject.md)** — Performs CRUD operations on GameObjects.
 - **[`manage_graphics`](./manage_graphics.md)** — Manage rendering graphics: volumes, post-processing, light baking, rendering stats, pipeline settings, and URP renderer features.
 - **[`manage_material`](./manage_material.md)** — Manages Unity materials (set properties, colors, shaders, etc).
+- **[`manage_optimization`](./manage_optimization.md)** — Manage Cross-platform Optimization — quality settings, texture compression, sprite atlases, lightmaps, occlusion culling, build size analysis
 - **[`manage_packages`](./manage_packages.md)** — Manage Unity packages: query, install, remove, embed, and configure registries.
 - **[`manage_physics`](./manage_physics.md)** — Manage physics settings, collision matrix, materials, joints, queries, and validation.
 - **[`manage_prefabs`](./manage_prefabs.md)** — Manages Unity Prefab assets.

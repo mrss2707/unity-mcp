@@ -44,6 +44,12 @@ CAPTURE:
 - screenshot: Capture a screenshot. By default (no camera specified) uses ScreenCapture API, which captures all render layers including Screen Space - Overlay UI canvases. Specifying a camera uses direct camera rendering, which EXCLUDES Screen Space - Overlay canvases (use only when you need a specific viewpoint without UI). Supports include_image=true for inline base64 PNG, batch='surround' for 6-angle contact sheet, batch='orbit' for configurable grid, view_target/view_position for positioned capture, and capture_source='scene_view' to capture the active Unity Scene View viewport.
 - screenshot_multiview: Shorthand for screenshot with batch='surround' and include_image=true.
 
+CINEMACHINE ADVANCED (requires Cinemachine package):
+- create_dolly: Create a CinemachineSmoothPath with waypoints and a dolly cart with VCam
+- create_state_driven: Create a CinemachineStateDrivenCamera linked to an Animator
+- create_clearshot: Create a CinemachineClearShot with child virtual cameras
+- set_cinemachine_volume: Add CinemachineVolumeSettings extension to a VCam
+
 ## Parameters
 
 | Name | Type | Required | Description |
@@ -67,6 +73,15 @@ CAPTURE:
 | `orbit_distance` | `float \| str \| None` | — | Camera distance from target for batch='orbit' (default auto). |
 | `orbit_fov` | `float \| str \| None` | — | Camera FOV in degrees for batch='orbit' (default 60). |
 | `output_folder` | `str \| None` | — | Optional folder for screenshot output. Project-relative (e.g. 'Assets/Screenshots' or 'Captures') or absolute path inside the project. Overrides the user's Editor preference. If omitted, falls back to the Editor preference, then to the built-in default (Assets/Screenshots). |
+| `trackPoints` | `list[str] \| None` | — | Array of waypoint positions as 'x,y,z' strings for create_dolly. |
+| `cartName` | `str \| None` | — | Name for the dolly cart GameObject (default: 'DollyCart'). |
+| `vcamPath` | `str \| None` | — | Path or name of the target virtual camera. |
+| `parentName` | `str \| None` | — | Name for the parent camera GameObject. |
+| `animatorPath` | `str \| None` | — | Path to the Animator for state-driven camera. |
+| `defaultCam` | `str \| None` | — | Default virtual camera for state-driven camera. |
+| `childVcams` | `list[str] \| None` | — | Child virtual camera names/paths for create_clearshot. |
+| `volumeProfilePath` | `str \| None` | — | Path to a Volume Profile asset for set_cinemachine_volume. |
+| `priority` | `int \| None` | — | Camera priority for set_cinemachine_volume. |
 
 ## Returns
 

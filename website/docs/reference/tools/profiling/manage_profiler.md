@@ -35,6 +35,10 @@ FRAME DEBUGGER:
 - frame_debugger_disable: Turn off Frame Debugger
 - frame_debugger_get_events: Get draw call events (paged, best-effort via reflection)
 
+GPU PROFILING:
+- get_draw_calls: Get draw call count, batched draws, SetPass calls per frame
+- get_gpu_profile: GPU time per-category (opaque, transparent, shadows, post-processing)
+
 ## Parameters
 
 | Name | Type | Required | Description |
@@ -52,6 +56,7 @@ FRAME DEBUGGER:
 | `snapshot_b` | `str \| None` | — | Second snapshot path for memory_compare_snapshots. |
 | `page_size` | `int \| None` | — | Page size for frame_debugger_get_events (default 50). |
 | `cursor` | `int \| None` | — | Cursor offset for frame_debugger_get_events. |
+| `frameIndex` | `int \| None` | — | Target frame index for get_draw_calls (-1 for latest). |
 
 ## Returns
 

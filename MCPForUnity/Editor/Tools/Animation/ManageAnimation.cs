@@ -277,10 +277,10 @@ namespace MCPForUnity.Editor.Tools.Animation
                 return new SuccessResponse("No animation clips in model",
                     new { clips = new object[0] });
 
+            var allAssets = AssetDatabase.LoadAllAssetsAtPath(modelPath);
             var clips = new List<object>();
             foreach (var ca in clipAnimations)
             {
-                var allAssets = AssetDatabase.LoadAllAssetsAtPath(modelPath);
                 var clip = allAssets
                     .OfType<AnimationClip>()
                     .FirstOrDefault(c => c.name == ca.name);

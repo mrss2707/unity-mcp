@@ -367,7 +367,7 @@ namespace MCPForUnity.Editor.Tools.Cameras
             var go = new GameObject(parentName);
             var sdc = go.AddComponent(sdcType);
 
-            var animator = GameObject.Find(animatorPath)?.GetComponent<Animator>();
+            var animator = ObjectResolver.ResolveGameObject(new JValue(animatorPath), "by_id_or_name_or_path", includeInactive: true)?.GetComponent<Animator>();
             if (animator == null)
                 return new ErrorResponse("ANIMATOR_NOT_FOUND",
                     $"No Animator found at: {animatorPath}");

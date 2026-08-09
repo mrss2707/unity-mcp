@@ -38,7 +38,13 @@ namespace MCPForUnityTests.Editor.Tools
                 "manage_shader",
                 "read_console",
                 "execute_menu_item",
-                "manage_prefabs"
+                "manage_prefabs",
+                "find_gameobjects",
+                "find_in_file",
+                "manage_audio",
+                "manage_addressables",
+                "manage_input_system",
+                "manage_optimization"
             };
 
             foreach (var toolName in expectedTools)

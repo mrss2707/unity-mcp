@@ -352,11 +352,7 @@ namespace MCPForUnity.Editor.Tools.Graphics
             if (string.IsNullOrEmpty(target))
                 return new ErrorResponse("'target' (light GameObject name or instance ID) is required.");
 
-            GameObject go = null;
-            if (int.TryParse(target, out int instanceId))
-                go = GameObjectLookup.ResolveInstanceID(instanceId) as GameObject;
-            if (go == null)
-                go = GameObject.Find(target);
+            GameObject go = ObjectResolver.ResolveGameObject(new JValue(target), "by_id_or_name_or_path", includeInactive: true);
             if (go == null)
                 return new ErrorResponse($"GameObject '{target}' not found.");
 

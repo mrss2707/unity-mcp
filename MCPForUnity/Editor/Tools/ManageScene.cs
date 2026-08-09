@@ -123,7 +123,7 @@ namespace MCPForUnity.Editor.Tools
                 orbitFov = ParamCoercion.CoerceFloatNullable(p["orbitFov"] ?? p["orbit_fov"]),
 
                 // scene_view_frame
-                sceneViewTarget = toolParams.GetRaw("scene_view_target"),
+                sceneViewTarget = p["sceneViewTarget"] ?? p["scene_view_target"],
 
                 // get_hierarchy paging + safety
                 parent = p["parent"],

@@ -7,6 +7,7 @@
 #   tools/check-unity-versions.sh --only 6000.0   # check only versions whose id starts with the given prefix
 #   tools/check-unity-versions.sh --docker        # run inside GameCI containers (no local Unity Hub install needed)
 #   tools/check-unity-versions.sh --pre-push      # hint mode used by the pre-push hook (changes failure message)
+#   tools/check-unity-versions.sh --require-run   # fail if every requested version is skipped
 #
 # Modes:
 #   - Default (local): looks for Unity editors under Unity Hub. Versions not installed are skipped.
@@ -33,6 +34,7 @@ FULL=0
 ONLY=""
 PRE_PUSH=0
 USE_DOCKER=0
+REQUIRE_RUN=0
 
 require_value() {
   # Validate that a flag taking a value got one (not another flag, not nothing).
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --docker) USE_DOCKER=1 ;;
     --docker-image-tag) require_value "$1" "${2:-}"; DOCKER_IMAGE_TAG="$2"; shift ;;
     --pre-push) PRE_PUSH=1 ;;
+    --require-run) REQUIRE_RUN=1 ;;
     -h|--help)
       sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -279,6 +282,10 @@ if [[ $pass_count -eq 0 && $skip_count -gt 0 ]]; then
   else
     echo "Note: no versions from tools/unity-versions.json are installed on this machine."
     echo "Either install via Unity Hub or use --docker (see --help for license setup)."
+  fi
+  if [[ $REQUIRE_RUN -eq 1 ]]; then
+    echo "error: --require-run was set and every requested version was skipped." >&2
+    exit 1
   fi
 fi
 

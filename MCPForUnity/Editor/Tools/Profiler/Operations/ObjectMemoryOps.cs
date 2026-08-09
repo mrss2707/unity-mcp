@@ -20,7 +20,7 @@ namespace MCPForUnity.Editor.Tools.Profiler
             string objectPath = objectPathResult.Value;
 
             // Try scene hierarchy first
-            var go = GameObject.Find(objectPath);
+            var go = ObjectResolver.ResolveGameObject(new JValue(objectPath), "by_id_or_name_or_path", includeInactive: true);
             if (go != null)
             {
                 long bytes = UProfiler.GetRuntimeMemorySizeLong(go);

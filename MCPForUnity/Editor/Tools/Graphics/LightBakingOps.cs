@@ -409,19 +409,13 @@ namespace MCPForUnity.Editor.Tools.Graphics
             catch { return null; }
         }
 
-        // --- Helper: Find a GameObject by name or instanceID ---
+        // --- Helper: Find a GameObject by instance ID, path, or exact name ---
         private static GameObject FindGameObject(string target)
         {
             if (string.IsNullOrEmpty(target))
                 return null;
 
-            if (int.TryParse(target, out int instanceId))
-            {
-                var byId = GameObjectLookup.ResolveInstanceID(instanceId) as GameObject;
-                if (byId != null) return byId;
-            }
-
-            return GameObject.Find(target);
+            return ObjectResolver.ResolveGameObject(new JValue(target), "by_id_or_name_or_path", includeInactive: true);
         }
 
         // --- Helper: Read bounceCount with version fallback ---

@@ -114,13 +114,7 @@ namespace MCPForUnity.Editor.Tools.Graphics
                 return allVolumes.Length > 0 ? allVolumes[0] as Component : null;
             }
 
-            if (int.TryParse(target, out int instanceId))
-            {
-                var byId = GameObjectLookup.ResolveInstanceID(instanceId) as GameObject;
-                if (byId != null) return byId.GetComponent(VolumeType);
-            }
-
-            var go = GameObject.Find(target);
+            var go = ObjectResolver.ResolveGameObject(new JValue(target), "by_id_or_name_or_path", includeInactive: true);
             if (go != null) return go.GetComponent(VolumeType);
 
             return null;

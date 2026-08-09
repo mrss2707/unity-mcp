@@ -26,6 +26,7 @@ import services.tools as tools_pkg
 from services.registry import get_registered_tools
 
 CSHARP_TOOLS_DIR = Path(__file__).resolve().parents[2] / "MCPForUnity" / "Editor" / "Tools"
+PAGINATION_HELPER_KEYS = {"page_size", "pageSize", "cursor", "page_number", "pageNumber"}
 
 # Keys handled by the transport/registry layer rather than by a tool's own C# handler.
 TRANSPORT_KEYS = {"action", "unity_instance", "client_id"}
@@ -34,9 +35,6 @@ TRANSPORT_KEYS = {"action", "unity_instance", "client_id"}
 # delete each entry as it is fixed. Tracked in docs/development/develop-audit.md.
 # Do not add to these lists to make a failure go away — a new entry means a new broken tool.
 KNOWN_IGNORED = {
-    # pre-existing on main
-    "find_gameobjects": {"cursor", "pageSize"},
-    "manage_scene": {"sceneViewTarget"},
 }
 KNOWN_UNREACHABLE = {
 }
@@ -46,14 +44,14 @@ KNOWN_UNREACHABLE = {
 CSHARP_KEY_PATTERNS = [
     # Any ToolParams accessor: Get, GetRequired, GetInt, GetNullableBool, GetStringArray, Has, ...
     # Every one of them takes the parameter key as its first argument.
-    re.compile(r'\bp\.(?:Get\w*|Has)\s*\(\s*"([^"]+)"'),
+    re.compile(r'\b(?:\w+)\.(?:Get\w*|Has)\s*\(\s*"([^"]+)"'),
     # Direct JObject indexing, e.g. ManageScene's `p["sceneName"] ?? p["scene_name"]`.
     # No \b before @params: '@' is not a word character, so \b would never match there.
     re.compile(r'(?:\bp|@params|\bparameters)\s*\[\s*"([^"]+)"\s*\]'),
     # JObject.TryGetValue, used by tools that pull a nested blob such as `properties`.
     re.compile(r'\.TryGetValue\s*\(\s*"([^"]+)"'),
 ]
-CSHARP_REQUIRED_PATTERN = re.compile(r'\bp\.GetRequired\s*\(\s*"([^"]+)"')
+CSHARP_REQUIRED_PATTERN = re.compile(r'\b(?:\w+)\.GetRequired\s*\(\s*"([^"]+)"')
 CSHARP_TOOL_ATTR = re.compile(r'\[McpForUnityTool\s*\(\s*"([^"]+)"')
 
 
@@ -133,6 +131,17 @@ def _capture_python_keys(monkeypatch, tool: dict) -> dict[str, set[str]]:
             sent.setdefault(tool_name, set()).update(params.keys())
         return {"success": True}
 
+    class DummyTransport:
+        async def send_command(self, tool_name, params):
+            if isinstance(params, dict):
+                sent.setdefault(tool_name, set()).update(params.keys())
+            return {"success": True}
+
+        async def send_command_with_retry(self, tool_name, params):
+            if isinstance(params, dict):
+                sent.setdefault(tool_name, set()).update(params.keys())
+            return {"success": True}
+
     for attr, replacement in (
         ("send_with_unity_instance", fake_send),
         ("get_unity_instance_from_context", AsyncMock(return_value="unity-1")),
@@ -185,6 +194,8 @@ def _parse_csharp() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
         keys = read.setdefault(name, set())
         for pattern in CSHARP_KEY_PATTERNS:
             keys.update(pattern.findall(source))
+        if "PaginationRequest.FromParams" in source:
+            keys.update(PAGINATION_HELPER_KEYS)
         required.setdefault(name, set()).update(CSHARP_REQUIRED_PATTERN.findall(source))
 
     # Handlers are routinely split across helper files that carry no attribute of their own —
@@ -208,6 +219,8 @@ def _parse_csharp() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
                 for name in tools_by_dir[ancestor]:
                     for pattern in CSHARP_KEY_PATTERNS:
                         read[name].update(pattern.findall(source))
+                    if "PaginationRequest.FromParams" in source:
+                        read[name].update(PAGINATION_HELPER_KEYS)
                 break
 
     return read, required

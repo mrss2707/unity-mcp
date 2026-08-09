@@ -105,26 +105,13 @@ namespace MCPForUnity.Editor.Tools.Cameras
                     return GameObjectLookup.FindById(jt.Value<int>());
                 if (jt.Type == JTokenType.String)
                 {
-                    string str = jt.ToString();
-                    if (int.TryParse(str, out int id))
-                    {
-                        var byId = GameObjectLookup.FindById(id);
-                        if (byId != null) return byId;
-                    }
-                    return GameObjectLookup.FindByTarget(jt, "by_name", true);
+                    return ObjectResolver.ResolveGameObject(jt, "by_id_or_name_or_path", includeInactive: true);
                 }
             }
 
             if (reference is string s)
             {
-                if (int.TryParse(s, out int id))
-                {
-                    var byId = GameObjectLookup.FindById(id);
-                    if (byId != null) return byId;
-                }
-                var ids = GameObjectLookup.SearchGameObjects(
-                    GameObjectLookup.SearchMethod.ByName, s, includeInactive: true, maxResults: 1);
-                return ids.Count > 0 ? GameObjectLookup.FindById(ids[0]) : null;
+                return ObjectResolver.ResolveGameObject(new JValue(s), "by_id_or_name_or_path", includeInactive: true);
             }
 
             return null;

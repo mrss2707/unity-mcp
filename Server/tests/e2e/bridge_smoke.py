@@ -138,6 +138,19 @@ def build_steps() -> list[Step]:
             f"created object '{GO_EMPTY}' (id={created.get('empty')}) not in find results {ids}",
         )
 
+    def check_find_paged(resp: Any) -> None:
+        _assert(_ok(resp), f"paged find_gameobjects failed: {_message(resp)}")
+        ids = _dig(resp, "instanceIDs") or []
+        _assert(len(ids) == 1, f"paged find should return exactly one id, got {ids}")
+        _assert(_dig(resp, "pageSize") == 1, f"pageSize not honored: {resp}")
+        _assert(_dig(resp, "totalCount") >= 1, f"totalCount missing from paged find: {resp}")
+
+    def check_addressables_negative(resp: Any) -> None:
+        if _ok(resp):
+            return
+        text = str(resp)
+        _assert("PACKAGE_MISSING" in text or "Addressable" in text, f"unexpected addressables response: {resp}")
+
     def check_create_cube(resp: Any) -> None:
         _assert(_ok(resp), f"create primitive Cube failed: {_message(resp)}")
 
@@ -159,6 +172,10 @@ def build_steps() -> list[Step]:
              {"action": "create", "name": GO_EMPTY}, check_create_empty),
         Step("find_created_gameobject", "find_gameobjects",
              {"searchMethod": "by_name", "searchTerm": GO_EMPTY}, check_found),
+        Step("find_created_gameobject_paged", "find_gameobjects",
+             {"searchMethod": "by_name", "searchTerm": GO_EMPTY, "pageSize": 1, "cursor": 0}, check_find_paged),
+        Step("addressables_package_negative", "manage_addressables",
+             {"action": "list_groups"}, check_addressables_negative),
         Step("create_primitive_with_component", "manage_gameobject",
              {"action": "create", "name": GO_CUBE, "primitiveType": "Cube",
               "componentsToAdd": ["Rigidbody"]}, check_create_cube),

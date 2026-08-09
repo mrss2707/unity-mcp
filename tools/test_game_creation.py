@@ -1,9 +1,9 @@
 """Integration test: Create a simple "Catch the Falling Cubes" game via Unity MCP tools.
 
 Exercises the newly added tools/actions from the 28-task spec upgrade.
-Run from Server/ directory with Unity connected:
+Run from the repository root or Server/ directory with Unity connected:
 
-    uv run python tests/manual/test_game_creation.py
+    uv run python ../tools/test_game_creation.py
 
 Requires: Unity Editor running with MCP plugin, bridge server on localhost.
 """
@@ -14,8 +14,8 @@ import os
 import sys
 from datetime import datetime
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
+# Add Server/src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Server", "src"))
 
 from cli.utils.connection import run_command
 from cli.utils.output import print_success, print_error, print_info
@@ -30,8 +30,9 @@ def cmd(tool: str, params: dict) -> dict:
 def assert_ok(result: dict, label: str):
     """Assert a command succeeded."""
     if result.get("success") is False or result.get("error"):
-        print_error(f"FAIL: {label} — {result.get('error', result)}")
-        return False
+        message = result.get("error") or result.get("message") or result
+        print_error(f"FAIL: {label} — {message}")
+        raise AssertionError(f"{label}: {message}")
     print_success(f"OK: {label}")
     return True
 
@@ -331,8 +332,9 @@ def test_find_gameobjects():
     print_info("\n=== Step 15: Test find_gameobjects ===")
 
     r = cmd("find_gameobjects", {
-        "action": "by_name",
-        "name": "Player",
+        "searchMethod": "by_name",
+        "searchTerm": "Player",
+        "pageSize": 10,
     })
     assert_ok(r, "Find GameObjects by name 'Player'")
 

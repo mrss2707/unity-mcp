@@ -10,7 +10,7 @@ from services.registry import mcp_for_unity_tool
 from services.tools import get_unity_instance_from_context
 from transport.unity_transport import send_with_unity_instance
 from transport.legacy.unity_connection import async_send_command_with_retry
-from services.tools.utils import parse_json_payload, normalize_properties
+from services.tools.utils import coerce_bool, coerce_int, parse_json_payload, normalize_properties
 from services.tools.preflight import preflight
 
 
@@ -79,6 +79,9 @@ async def manage_components(
     paramValue: Annotated[Optional[str], "Parameter value for typed listener (as string, will be parsed by C#)."] = None,
     paramObjectPath: Annotated[Optional[str], "Path to the GameObject passed as the argument when paramType is 'Object'."] = None,
     listenerIndex: Annotated[Optional[int], "Index of the persistent listener to remove."] = None,
+    page_size: Annotated[Optional[int | str], "Number of items per page for list_all/get_listeners."] = None,
+    cursor: Annotated[Optional[int | str], "Zero-based cursor for list_all/get_listeners paging."] = None,
+    include_inactive: Annotated[Optional[bool | str], "Include inactive GameObjects for inspection/listener target lookup."] = None,
 ) -> dict[str, Any]:
     """
     Manage components on GameObjects.
@@ -96,9 +99,11 @@ async def manage_components(
     """
     unity_instance = await get_unity_instance_from_context(ctx)
 
-    gate = await preflight(ctx, wait_for_no_compile=True, refresh_if_dirty=True)
-    if gate is not None:
-        return gate.model_dump()
+    read_only_actions = {"get_property", "list_all", "get_listeners"}
+    if action not in read_only_actions:
+        gate = await preflight(ctx, wait_for_no_compile=True, refresh_if_dirty=True)
+        if gate is not None:
+            return gate.model_dump()
 
     if not action:
         return {
@@ -143,6 +148,14 @@ async def manage_components(
             "paramObjectPath": paramObjectPath,
             "listenerIndex": listenerIndex,
         }
+
+        if page_size is not None:
+            params["pageSize"] = coerce_int(page_size, default=50)
+        if cursor is not None:
+            params["cursor"] = coerce_int(cursor, default=0)
+        include_inactive_value = coerce_bool(include_inactive, default=None)
+        if include_inactive_value is not None:
+            params["includeInactive"] = include_inactive_value
 
         if search_method:
             params["searchMethod"] = search_method

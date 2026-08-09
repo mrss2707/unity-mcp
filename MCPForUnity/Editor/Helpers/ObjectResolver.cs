@@ -62,7 +62,7 @@ namespace MCPForUnity.Editor.Helpers
             }
 
             // --- Scene Object Search ---
-            GameObject foundGo = GameObjectLookup.FindByTarget(new JValue(findTerm), searchMethodToUse, includeInactive: false);
+            GameObject foundGo = GameObjectLookup.FindByTarget(new JValue(findTerm), searchMethodToUse, includeInactive: true);
 
             if (foundGo == null)
             {
@@ -107,7 +107,7 @@ namespace MCPForUnity.Editor.Helpers
         /// <summary>
         /// Convenience method to resolve a GameObject.
         /// </summary>
-        public static GameObject ResolveGameObject(JToken target, string searchMethod = null)
+        public static GameObject ResolveGameObject(JToken target, string searchMethod = null, bool includeInactive = true)
         {
             if (target == null)
                 return null;
@@ -115,7 +115,7 @@ namespace MCPForUnity.Editor.Helpers
             // If target is a simple value, use GameObjectLookup directly
             if (target.Type != JTokenType.Object)
             {
-                return GameObjectLookup.FindByTarget(target, searchMethod ?? "by_id_or_name_or_path");
+                return GameObjectLookup.FindByTarget(target, searchMethod ?? "by_id_or_name_or_path", includeInactive);
             }
 
             // If target is an instruction object

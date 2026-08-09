@@ -67,7 +67,8 @@ namespace MCPForUnity.Editor.Tools
                         return SetProperty(@params, targetToken, searchMethod);
                     case "get_property":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        bool includeInactive = p.GetBool("includeInactive");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value, includeInactive);
                         string componentType = p.GetRequired("componentType").Value;
                         string propertyName = p.GetRequired("propertyName").Value;
 
@@ -88,16 +89,28 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "list_all":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
                         bool includeInactive = p.GetBool("includeInactive");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value, includeInactive);
+                        var pagination = PaginationRequest.FromParams(@params, defaultPageSize: 50);
+                        pagination.PageSize = Math.Max(1, Math.Min(pagination.PageSize, 500));
                         var components = go.GetComponents<Component>()
                             .Where(c => c != null)
                             .Select(c => new {
                                 type = c.GetType().Name,
                                 fullName = c.GetType().FullName,
                                 assemblyName = c.GetType().Assembly.GetName().Name
-                            }).ToList();
-                        return new SuccessResponse("Components list", new { components });
+                            }).Cast<object>().ToList();
+                        var page = PaginationResponse<object>.Create(components, pagination);
+                        return new SuccessResponse("Components list", new
+                        {
+                            components = page.Items,
+                            count = page.TotalCount,
+                            totalCount = page.TotalCount,
+                            pageSize = page.PageSize,
+                            cursor = page.Cursor,
+                            nextCursor = page.NextCursor,
+                            hasMore = page.HasMore
+                        });
                     }
                     case "add_simple_listener":
                         return AddPersistentListener(p, typed: false);
@@ -107,7 +120,8 @@ namespace MCPForUnity.Editor.Tools
 
                     case "remove_listener":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        bool includeInactive = p.GetBool("includeInactive");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value, includeInactive);
                         string componentType = p.GetRequired("componentType").Value;
                         string eventName = p.GetRequired("eventName").Value;
                         int listenerIndex = p.GetInt("listenerIndex") ?? 0;
@@ -127,6 +141,7 @@ namespace MCPForUnity.Editor.Tools
                             return new ErrorResponse("INDEX_OUT_OF_RANGE",
                                 $"Listener index {listenerIndex} is out of range; {eventName} has {rCalls.arraySize} listener(s).");
 
+                        Undo.RecordObject(component, "Remove persistent listener");
                         rCalls.DeleteArrayElementAtIndex(listenerIndex);
                         so.ApplyModifiedProperties();
                         PrefabUtility.RecordPrefabInstancePropertyModifications(component);
@@ -137,7 +152,8 @@ namespace MCPForUnity.Editor.Tools
                     }
                     case "get_listeners":
                     {
-                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value);
+                        bool includeInactive = p.GetBool("includeInactive");
+                        var go = FindGameObject(p.GetRequired("gameObjectPath").Value, includeInactive);
                         string componentType = p.GetRequired("componentType").Value;
                         string eventName = p.GetRequired("eventName").Value;
 
@@ -170,8 +186,20 @@ namespace MCPForUnity.Editor.Tools
                             });
                         }
 
+                        var pagination = PaginationRequest.FromParams(@params, defaultPageSize: 50);
+                        pagination.PageSize = Math.Max(1, Math.Min(pagination.PageSize, 500));
+                        var page = PaginationResponse<object>.Create(listeners, pagination);
                         return new SuccessResponse($"Found {gCount} listeners",
-                            new { count = gCount, listeners });
+                            new
+                            {
+                                count = gCount,
+                                listeners = page.Items,
+                                totalCount = page.TotalCount,
+                                pageSize = page.PageSize,
+                                cursor = page.Cursor,
+                                nextCursor = page.NextCursor,
+                                hasMore = page.HasMore
+                            });
                     }
                     default:
                         return new ErrorResponse($"Unknown action: '{action}'. Supported actions: add, remove, set_property, get_property, list_all, add_simple_listener, add_param_listener, remove_listener, get_listeners");
@@ -537,9 +565,10 @@ namespace MCPForUnity.Editor.Tools
             return error;
         }
 
-        private static GameObject FindGameObject(string path)
+        private static GameObject FindGameObject(string path, bool includeInactive = false)
         {
-            var go = GameObject.Find(path);
+            var go = GameObjectLookup.FindByTarget(new JValue(path), "by_path", includeInactive)
+                ?? GameObjectLookup.FindByTarget(new JValue(path), "by_name", includeInactive);
             if (go == null)
                 throw new Exception($"GameObject not found at path: {path}");
             return go;
@@ -621,11 +650,12 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(objectPath))
                     return new ErrorResponse("MISSING_PARAMETER",
                         "paramType 'Object' needs 'paramObjectPath' naming the GameObject to pass.");
-                objectArgument = GameObject.Find(objectPath);
+                objectArgument = FindGameObject(objectPath, p.GetBool("includeInactive"));
                 if (objectArgument == null)
                     return new ErrorResponse("NOT_FOUND", $"GameObject not found at path: {objectPath}");
             }
 
+            Undo.RecordObject(component, "Add persistent listener");
             int index = calls.arraySize;
             calls.InsertArrayElementAtIndex(index);
             var call = calls.GetArrayElementAtIndex(index);

@@ -26,7 +26,8 @@ namespace MCPForUnity.Editor.Helpers
             ByLayer,
             ByComponent,
             ByPath,
-            ById
+            ById,
+            ByIdOrNameOrPath
         }
 
         /// <summary>
@@ -45,6 +46,7 @@ namespace MCPForUnity.Editor.Helpers
                 "by_component" => SearchMethod.ByComponent,
                 "by_path" => SearchMethod.ByPath,
                 "by_id" => SearchMethod.ById,
+                "by_id_or_name_or_path" => SearchMethod.ByIdOrNameOrPath,
                 _ => SearchMethod.ByName
             };
         }
@@ -120,6 +122,10 @@ namespace MCPForUnity.Editor.Helpers
                     }
                     break;
 
+                case SearchMethod.ByIdOrNameOrPath:
+                    results.AddRange(SearchByIdOrNameOrPath(searchTerm, includeInactive, maxResults));
+                    break;
+
                 case SearchMethod.ByName:
                     results.AddRange(SearchByName(searchTerm, includeInactive, maxResults));
                     break;
@@ -142,6 +148,36 @@ namespace MCPForUnity.Editor.Helpers
             }
 
             return results;
+        }
+
+        private static IEnumerable<int> SearchByIdOrNameOrPath(string target, bool includeInactive, int maxResults)
+        {
+            var seen = new HashSet<int>();
+
+            if (int.TryParse(target, out int instanceId))
+            {
+                var byId = ResolveInstanceID(instanceId) as GameObject;
+                if (byId != null && (includeInactive || byId.activeInHierarchy))
+                {
+                    seen.Add(instanceId);
+                    yield return instanceId;
+                    if (maxResults > 0 && seen.Count >= maxResults) yield break;
+                }
+            }
+
+            foreach (var id in SearchByPath(target, includeInactive))
+            {
+                if (!seen.Add(id)) continue;
+                yield return id;
+                if (maxResults > 0 && seen.Count >= maxResults) yield break;
+            }
+
+            foreach (var id in SearchByName(target, includeInactive, maxResults))
+            {
+                if (!seen.Add(id)) continue;
+                yield return id;
+                if (maxResults > 0 && seen.Count >= maxResults) yield break;
+            }
         }
 
         private static IEnumerable<int> SearchByName(string name, bool includeInactive, int maxResults)

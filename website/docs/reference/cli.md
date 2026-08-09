@@ -53,6 +53,10 @@ The CLI mirrors the MCP tool catalog. Each command group wraps one or more `mana
 | `mcp-for-unity component` | Add/remove/configure components | [`manage_components`](/reference/tools/core/manage_components) |
 | `mcp-for-unity script` | Create/read/modify C# scripts | [`manage_script`](/reference/tools/core/manage_script) |
 | `mcp-for-unity asset` | Asset import/create/modify/search | [`manage_asset`](/reference/tools/core/manage_asset) |
+| `mcp-for-unity addressables` | Addressables groups, assets, builds, dependencies | [`manage_addressables`](/reference/tools/core/manage_addressables) |
+| `mcp-for-unity input-system` | InputActionAsset maps, actions, bindings | [`manage_input_system`](/reference/tools/input_system/manage_input_system) |
+| `mcp-for-unity find-in-file` | File regex search and capped symbol references | [`find_in_file`](/reference/tools/core/find_in_file) |
+| `mcp-for-unity optimization` | Quality, texture, atlas, build-size optimization | [`manage_optimization`](/reference/tools/core/manage_optimization) |
 | `mcp-for-unity material` | Material CRUD + shader props | [`manage_material`](/reference/tools/core/manage_material) |
 | `mcp-for-unity prefab` | Prefab create/instantiate/unpack | [`manage_prefabs`](/reference/tools/core/manage_prefabs) |
 | `mcp-for-unity texture` | Texture create + patterns/gradients | [`manage_texture`](/reference/tools/vfx/manage_texture) |
@@ -83,6 +87,9 @@ Every group supports `--help`:
 ```bash
 mcp-for-unity scene --help
 mcp-for-unity scene load --help
+mcp-for-unity build configure-code-generation --help
+mcp-for-unity build configure-aab --help
+mcp-for-unity build report --help
 ```
 
 The help text is the authoritative per-command reference — flags, choices, and defaults all live there because the CLI is built on Click and self-describes.

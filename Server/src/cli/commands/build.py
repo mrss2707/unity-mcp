@@ -226,3 +226,57 @@ def cancel(job_id: str):
     config = get_config()
     result = run_command("manage_build", {"action": "cancel", "job_id": job_id}, config)
     click.echo(format_output(result, config.format))
+
+
+@build.command("configure-code-generation")
+@click.option("--scripting-backend", type=click.Choice(["Mono", "IL2CPP"]), help="Scripting backend.")
+@click.option("--stripping-level", type=click.Choice(["Disabled", "Low", "Medium", "High"]), help="Managed stripping level.")
+@click.option("--compiler-config", type=click.Choice(["Debug", "Release", "Master"]), help="IL2CPP compiler config.")
+@click.option("--preserve-assembly", "preserve_assemblies", multiple=True, help="Assembly to preserve; repeatable.")
+@handle_unity_errors
+def configure_code_generation(scripting_backend, stripping_level, compiler_config, preserve_assemblies):
+    """Configure build code generation settings."""
+    config = get_config()
+    params = {"action": "configure_code_generation"}
+    if scripting_backend:
+        params["scriptingBackend"] = scripting_backend
+    if stripping_level:
+        params["strippingLevel"] = stripping_level
+    if compiler_config:
+        params["compilerConfig"] = compiler_config
+    if preserve_assemblies:
+        params["preserveAssemblies"] = list(preserve_assemblies)
+    result = run_command("manage_build", params, config)
+    click.echo(format_output(result, config.format))
+
+
+@build.command("configure-aab")
+@click.option("--bundle-version-code", type=int, help="Android bundle version code.")
+@click.option("--keystore-path", help="Keystore path from local secure storage/env.")
+@click.option("--key-alias", help="Android signing key alias.")
+@handle_unity_errors
+def configure_aab(bundle_version_code, keystore_path, key_alias):
+    """Configure Android App Bundle settings."""
+    config = get_config()
+    params = {"action": "configure_aab"}
+    if bundle_version_code is not None:
+        params["bundleVersionCode"] = bundle_version_code
+    if keystore_path:
+        params["keystorePath"] = keystore_path
+    if key_alias:
+        params["keyAlias"] = key_alias
+    result = run_command("manage_build", params, config)
+    click.echo(format_output(result, config.format))
+
+
+@build.command("report")
+@click.argument("build_path", required=False)
+@handle_unity_errors
+def report(build_path: Optional[str]):
+    """Get a build report by path or last report."""
+    config = get_config()
+    params = {"action": "get_build_report"}
+    if build_path:
+        params["buildPath"] = build_path
+    result = run_command("manage_build", params, config)
+    click.echo(format_output(result, config.format))

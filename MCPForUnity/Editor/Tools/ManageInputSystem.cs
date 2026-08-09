@@ -236,22 +236,46 @@ namespace MCPForUnity.Editor.Tools
 
             try
             {
-                // Call ToJson() via reflection
-                var toJsonMethod = _assetType.GetMethod("ToJson", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
-                if (toJsonMethod == null)
+                bool includeJson = p.GetBool("includeJson", false);
+                int jsonCursor = Math.Max(0, p.GetInt("jsonCursor") ?? 0);
+                int jsonChunkSize = Math.Max(1, Math.Min(p.GetInt("jsonChunkSize") ?? 8192, 65536));
+                var pagination = new PaginationRequest
                 {
-                    // Fallback: try ToJson with parameters
-                    toJsonMethod = _assetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                        .FirstOrDefault(m => m.Name == "ToJson" && m.GetParameters().Length == 0);
-                }
-
-                string json = toJsonMethod != null
-                    ? (string)toJsonMethod.Invoke(asset, null)
-                    : SerializeAssetViaReflection(asset);
+                    PageSize = p.GetInt("pageSize") ?? p.GetInt("page_size") ?? 50,
+                    Cursor = p.GetInt("cursor") ?? 0
+                };
+                pagination.PageSize = Math.Max(1, Math.Min(pagination.PageSize, 500));
 
                 // Get action maps info
                 var mapsInfo = GetActionMapsInfo(asset);
                 var schemesInfo = GetControlSchemesInfo(asset);
+                var pagedMaps = PaginationResponse<JToken>.Create(mapsInfo.ToList(), pagination);
+
+                string jsonChunk = null;
+                int? jsonNextCursor = null;
+                int jsonTotalChars = 0;
+                if (includeJson)
+                {
+                    // Call ToJson() via reflection
+                    var toJsonMethod = _assetType.GetMethod("ToJson", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                    if (toJsonMethod == null)
+                    {
+                        // Fallback: try ToJson with parameters
+                        toJsonMethod = _assetType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                            .FirstOrDefault(m => m.Name == "ToJson" && m.GetParameters().Length == 0);
+                    }
+
+                    string json = toJsonMethod != null
+                        ? (string)toJsonMethod.Invoke(asset, null)
+                        : SerializeAssetViaReflection(asset);
+                    jsonTotalChars = json.Length;
+                    if (jsonCursor < jsonTotalChars)
+                    {
+                        int length = Math.Min(jsonChunkSize, jsonTotalChars - jsonCursor);
+                        jsonChunk = json.Substring(jsonCursor, length);
+                        jsonNextCursor = jsonCursor + length < jsonTotalChars ? jsonCursor + length : (int?)null;
+                    }
+                }
 
                 return new SuccessResponse(
                     $"Loaded InputActionAsset from '{path}'.",
@@ -259,9 +283,21 @@ namespace MCPForUnity.Editor.Tools
                     {
                         path,
                         guid = AssetDatabase.AssetPathToGUID(path),
-                        json,
-                        actionMaps = mapsInfo,
-                        controlSchemes = schemesInfo
+                        actionMapCount = mapsInfo.Count,
+                        controlSchemeCount = schemesInfo.Count,
+                        actionMaps = pagedMaps.Items,
+                        controlSchemes = schemesInfo,
+                        cursor = pagedMaps.Cursor,
+                        nextCursor = pagedMaps.NextCursor,
+                        pageSize = pagedMaps.PageSize,
+                        hasMore = pagedMaps.HasMore,
+                        totalCount = pagedMaps.TotalCount,
+                        includeJson,
+                        jsonChunk,
+                        jsonCursor,
+                        jsonNextCursor,
+                        jsonTotalChars,
+                        jsonChunkSize
                     });
             }
             catch (Exception ex)
@@ -1222,12 +1258,28 @@ namespace MCPForUnity.Editor.Tools
                     return new ErrorResponse("SERIALIZE_FAILED",
                         $"InputActionAsset at '{path}' serialised to nothing; refusing to overwrite it.");
 
-                System.IO.File.WriteAllText(path, json);
-                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+                string previousJson = System.IO.File.Exists(path)
+                    ? System.IO.File.ReadAllText(path)
+                    : null;
 
-                if (LoadAsset(path) == null)
-                    return new ErrorResponse("IMPORT_FAILED",
-                        $"'{path}' no longer imports as an InputActionAsset after saving.");
+                try
+                {
+                    System.IO.File.WriteAllText(path, json);
+                    AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+
+                    if (LoadAsset(path) == null)
+                        throw new InvalidOperationException(
+                            $"'{path}' no longer imports as an InputActionAsset after saving.");
+                }
+                catch
+                {
+                    if (previousJson != null)
+                    {
+                        System.IO.File.WriteAllText(path, previousJson);
+                        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+                    }
+                    throw;
+                }
 
                 return null;
             }

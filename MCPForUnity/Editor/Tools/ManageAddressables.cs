@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using MCPForUnity.Editor.Helpers;
+using MCPForUnity.Editor.Tools.Build;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -21,6 +22,8 @@ namespace MCPForUnity.Editor.Tools
         private static Type _entryType;
         private static Type _groupSchemaType;
         private static bool _reflectionInitAttempted;
+        private static readonly TimeSpan BuildJobTimeout = TimeSpan.FromHours(2);
+        private static readonly TimeSpan CompletedJobRetention = TimeSpan.FromMinutes(30);
 
         private static bool PackageAvailable
         {
@@ -723,20 +726,26 @@ namespace MCPForUnity.Editor.Tools
                         "Addressable Asset Settings not found. " +
                         "Set up Addressables first via Window > Asset Management > Addressables.");
 
-                string jobId = $"addr-build-{Guid.NewGuid():N}";
-
-                // Store initial build state
-                McpJobStateStore.SaveState(jobId, new JObject
+                string targetPlatform = p.Get("targetPlatform");
+                if (!string.IsNullOrEmpty(targetPlatform))
                 {
-                    ["jobId"] = jobId,
-                    ["status"] = "running",
-                    ["startTime"] = DateTime.Now.ToString("O")
-                });
+                    if (!BuildTargetMapping.TryResolveBuildTarget(targetPlatform, out BuildTarget buildTarget))
+                        return new ErrorResponse("INVALID_PLATFORM", BuildTargetMapping.GetUnknownBuildTargetMessage(targetPlatform));
+                    if (EditorUserBuildSettings.activeBuildTarget != buildTarget)
+                        return new ErrorResponse("PLATFORM_MISMATCH",
+                            $"Addressables builds use the active Unity build target ({EditorUserBuildSettings.activeBuildTarget}). " +
+                            $"Switch platform before requesting '{targetPlatform}'.");
+                }
+
+                string jobId = $"addr-build-{Guid.NewGuid():N}";
+                DateTime createdAt = DateTime.UtcNow;
+                DateTime deadline = createdAt + BuildJobTimeout;
 
                 // Resolve BuildPlayerContent method
                 var buildMethod = _settingsType.GetMethod("BuildPlayerContent",
                     BindingFlags.Public | BindingFlags.Static,
                     null, Type.EmptyTypes, null);
+                object[] args = null;
 
                 if (buildMethod == null)
                 {
@@ -750,76 +759,80 @@ namespace MCPForUnity.Editor.Tools
                         buildMethod = _settingsType.GetMethod("BuildPlayerContent",
                             BindingFlags.Public | BindingFlags.Static,
                             null, new[] { contentOptionsType }, null);
-
                         if (buildMethod != null)
                         {
-                            var options = Activator.CreateInstance(contentOptionsType);
-                            EditorApplication.delayCall += () =>
-                            {
-                                try
-                                {
-                                    buildMethod.Invoke(null, new[] { options });
-                                    McpJobStateStore.SaveState(jobId, new JObject
-                                    {
-                                        ["jobId"] = jobId,
-                                        ["status"] = "completed",
-                                        ["startTime"] = DateTime.Now.ToString("O"),
-                                        ["endTime"] = DateTime.Now.ToString("O")
-                                    });
-                                }
-                                catch (Exception ex)
-                                {
-                                    McpJobStateStore.SaveState(jobId, new JObject
-                                    {
-                                        ["jobId"] = jobId,
-                                        ["status"] = "failed",
-                                        ["error"] = ex.InnerException?.Message ?? ex.Message,
-                                        ["startTime"] = DateTime.Now.ToString("O"),
-                                        ["endTime"] = DateTime.Now.ToString("O")
-                                    });
-                                }
-                            };
+                            args = new[] { Activator.CreateInstance(contentOptionsType) };
                         }
                     }
-                }
-                else
-                {
-                    // No-arg overload
-                    EditorApplication.delayCall += () =>
-                    {
-                        try
-                        {
-                            buildMethod.Invoke(null, null);
-                            McpJobStateStore.SaveState(jobId, new JObject
-                            {
-                                ["jobId"] = jobId,
-                                ["status"] = "completed",
-                                ["startTime"] = DateTime.Now.ToString("O"),
-                                ["endTime"] = DateTime.Now.ToString("O")
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            McpJobStateStore.SaveState(jobId, new JObject
-                            {
-                                ["jobId"] = jobId,
-                                ["status"] = "failed",
-                                ["error"] = ex.InnerException?.Message ?? ex.Message,
-                                ["startTime"] = DateTime.Now.ToString("O"),
-                                ["endTime"] = DateTime.Now.ToString("O")
-                            });
-                        }
-                    };
                 }
 
                 if (buildMethod == null)
                     return new ErrorResponse("API_INCOMPATIBLE",
                         "Cannot find BuildPlayerContent method on AddressableAssetSettings.");
 
+                McpJobStateStore.SaveState(jobId, new JObject
+                {
+                    ["job_id"] = jobId,
+                    ["jobId"] = jobId,
+                    ["status"] = "queued",
+                    ["createdAt"] = createdAt.ToString("O"),
+                    ["deadline"] = deadline.ToString("O")
+                });
+
+                MethodInfo methodToInvoke = buildMethod;
+                object[] argsToInvoke = args;
+                EditorApplication.update += RunQueuedAddressablesBuild;
+
+                void RunQueuedAddressablesBuild()
+                {
+                    EditorApplication.update -= RunQueuedAddressablesBuild;
+                    DateTime startedAt = DateTime.UtcNow;
+                    McpJobStateStore.SaveState(jobId, new JObject
+                    {
+                        ["job_id"] = jobId,
+                        ["jobId"] = jobId,
+                        ["status"] = "running",
+                        ["createdAt"] = createdAt.ToString("O"),
+                        ["startedAt"] = startedAt.ToString("O"),
+                        ["deadline"] = deadline.ToString("O")
+                    });
+
+                    try
+                    {
+                        methodToInvoke.Invoke(null, argsToInvoke);
+                        DateTime completedAt = DateTime.UtcNow;
+                        McpJobStateStore.SaveState(jobId, new JObject
+                        {
+                            ["job_id"] = jobId,
+                            ["jobId"] = jobId,
+                            ["status"] = "completed",
+                            ["createdAt"] = createdAt.ToString("O"),
+                            ["startedAt"] = startedAt.ToString("O"),
+                            ["completedAt"] = completedAt.ToString("O"),
+                            ["deadline"] = deadline.ToString("O")
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        DateTime completedAt = DateTime.UtcNow;
+                        McpJobStateStore.SaveState(jobId, new JObject
+                        {
+                            ["job_id"] = jobId,
+                            ["jobId"] = jobId,
+                            ["status"] = "failed",
+                            ["error"] = ex.InnerException?.Message ?? ex.Message,
+                            ["createdAt"] = createdAt.ToString("O"),
+                            ["startedAt"] = startedAt.ToString("O"),
+                            ["completedAt"] = completedAt.ToString("O"),
+                            ["deadline"] = deadline.ToString("O")
+                        });
+                    }
+                }
+
                 return new PendingResponse(
-                    $"Addressables content build started (job {jobId}).",
+                    $"Addressables content build queued (job {jobId}).",
                     pollIntervalSeconds: 2.0,
-                    data: new { jobId });
+                    data: new { job_id = jobId, jobId, createdAt, deadline });
             }
             catch (Exception ex)
             {
@@ -980,31 +993,53 @@ namespace MCPForUnity.Editor.Tools
 
                 string status = state["status"]?.ToString();
 
-                if (string.Equals(status, "running",
-                    StringComparison.OrdinalIgnoreCase))
+                DateTime now = DateTime.UtcNow;
+                if (TryReadDateTime(state["deadline"], out DateTime deadline) && now > deadline &&
+                    (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)))
+                {
+                    state["status"] = "timed_out";
+                    state["completedAt"] = now.ToString("O");
+                    state["error"] = "Addressables build exceeded the polling deadline.";
+                    McpJobStateStore.SaveState(jobId, state);
+                    return new ErrorResponse("TIMED_OUT",
+                        "Addressables content build timed out.", state);
+                }
+
+                if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
                 {
                     return new PendingResponse(
-                        "Addressables content build is running...",
+                        string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
+                            ? "Addressables content build is queued..."
+                            : "Addressables content build is running...",
                         pollIntervalSeconds: 2.0,
                         data: state);
                 }
 
-                if (string.Equals(status, "completed",
-                    StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Clean up state
-                    McpJobStateStore.ClearState(jobId);
+                    if (TryReadDateTime(state["completedAt"] ?? state["endTime"], out DateTime completedAt) &&
+                        now - completedAt > CompletedJobRetention)
+                    {
+                        McpJobStateStore.ClearState(jobId);
+                    }
                     return new SuccessResponse(
                         "Addressables content build completed.", state);
                 }
 
-                if (string.Equals(status, "failed",
-                    StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "timed_out", StringComparison.OrdinalIgnoreCase))
                 {
                     string error = state["error"]?.ToString() ?? "Unknown error";
-                    McpJobStateStore.ClearState(jobId);
-                    return new ErrorResponse("BUILD_FAILED",
-                        $"Addressables content build failed: {error}");
+                    if (TryReadDateTime(state["completedAt"] ?? state["endTime"], out DateTime completedAt) &&
+                        now - completedAt > CompletedJobRetention)
+                    {
+                        McpJobStateStore.ClearState(jobId);
+                    }
+                    return new ErrorResponse(
+                        string.Equals(status, "timed_out", StringComparison.OrdinalIgnoreCase) ? "TIMED_OUT" : "BUILD_FAILED",
+                        $"Addressables content build {status}: {error}", state);
                 }
 
                 return new SuccessResponse(
@@ -1015,6 +1050,13 @@ namespace MCPForUnity.Editor.Tools
                 return new ErrorResponse("STATUS_FAILED",
                     $"Failed to get build status: {ex.Message}");
             }
+        }
+
+        private static bool TryReadDateTime(JToken token, out DateTime value)
+        {
+            value = default;
+            return token != null && DateTime.TryParse(token.ToString(), null,
+                System.Globalization.DateTimeStyles.RoundtripKind, out value);
         }
     }
 }

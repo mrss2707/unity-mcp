@@ -715,27 +715,12 @@ namespace MCPForUnity.Editor.Tools
 
                 var summary = latestReport.summary;
 
-                // Build per-file breakdown from all report steps
-                var files = new List<object>();
-                foreach (var step in latestReport.steps)
-                {
-                    foreach (var message in step.messages)
-                    {
-                        if (message.type == LogType.Error || message.type == LogType.Warning)
-                            continue;
+                var files = BuildReportCompat.GetFiles(latestReport)?
+                    .Select(f => new { path = f.Path, size = f.Size, role = f.Role })
+                    .Cast<object>()
+                    .ToList() ?? new List<object>();
 
-                        if (!string.IsNullOrEmpty(message.content))
-                        {
-                            files.Add(new
-                            {
-                                step = step.name,
-                                message = message.content
-                            });
-                        }
-                    }
-                }
-
-                // Collect file size info from packed assets
+                // Collect packed asset info separately from build output files.
                 var packedAssets = new List<object>();
                 foreach (var packedAsset in latestReport.packedAssets)
                 {
@@ -763,7 +748,8 @@ namespace MCPForUnity.Editor.Tools
                         totalWarnings = summary.totalWarnings,
                         startedAt = summary.buildStartedAt,
                         endedAt = summary.buildEndedAt,
-                        files = packedAssets
+                        files,
+                        packedAssets
                     });
             }
             catch (Exception ex)

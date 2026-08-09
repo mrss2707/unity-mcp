@@ -129,7 +129,7 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(goPath))
                     return new ErrorResponse("'gameObjectPath' parameter is required.");
 
-                GameObject go = GameObject.Find(goPath);
+                GameObject go = ObjectResolver.ResolveGameObject(new JValue(goPath));
                 if (go == null)
                     return new ErrorResponse("NOT_FOUND", $"GameObject '{goPath}' not found.");
 
@@ -194,7 +194,7 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(goPath))
                     return new ErrorResponse("'gameObjectPath' parameter is required.");
 
-                GameObject go = GameObject.Find(goPath);
+                GameObject go = ObjectResolver.ResolveGameObject(new JValue(goPath));
                 if (go == null)
                     return new ErrorResponse("NOT_FOUND", $"GameObject '{goPath}' not found.");
 
@@ -274,7 +274,7 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(goPath))
                     return new ErrorResponse("'gameObjectPath' parameter is required.");
 
-                GameObject go = GameObject.Find(goPath);
+                GameObject go = ObjectResolver.ResolveGameObject(new JValue(goPath));
                 if (go == null)
                     return new ErrorResponse("NOT_FOUND", $"GameObject '{goPath}' not found.");
 
@@ -332,7 +332,7 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(goPath))
                     return new ErrorResponse("'gameObjectPath' parameter is required.");
 
-                GameObject go = GameObject.Find(goPath);
+                GameObject go = ObjectResolver.ResolveGameObject(new JValue(goPath));
                 if (go == null)
                     return new ErrorResponse("NOT_FOUND", $"GameObject '{goPath}' not found.");
 
@@ -656,7 +656,7 @@ namespace MCPForUnity.Editor.Tools
                 if (string.IsNullOrEmpty(goPath))
                     return new ErrorResponse("'gameObjectPath' parameter is required.");
 
-                GameObject go = GameObject.Find(goPath);
+                GameObject go = ObjectResolver.ResolveGameObject(new JValue(goPath));
                 if (go == null)
                     return new ErrorResponse("NOT_FOUND", $"GameObject '{goPath}' not found.");
 

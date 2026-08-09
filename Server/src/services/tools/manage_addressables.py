@@ -11,7 +11,7 @@ from transport.legacy.unity_connection import async_send_command_with_retry
 
 ALL_ACTIONS = [
     "create_group", "assign_asset", "remove_asset",
-    "list_groups", "build_content", "get_dependency_chain",
+    "list_groups", "build_content", "get_dependency_chain", "status",
 ]
 
 
@@ -24,7 +24,7 @@ async def manage_addressables(
     ctx: Context,
     action: Annotated[Literal[
         "create_group", "assign_asset", "remove_asset",
-        "list_groups", "build_content", "get_dependency_chain",
+        "list_groups", "build_content", "get_dependency_chain", "status",
     ], "The operation to perform."],
     groupName: Annotated[str | None, "Addressable group name."] = None,
     schemaType: Annotated[str | None, "Schema type for the new group, e.g. BundledAssetGroupSchema (default) or ContentUpdateGroupSchema."] = None,
@@ -33,6 +33,8 @@ async def manage_addressables(
     assetPath: Annotated[str | None, "Asset path to assign/remove."] = None,
     address: Annotated[str | None, "Addressable address for the asset."] = None,
     labels: Annotated[list[str] | None, "Labels for the addressable asset."] = None,
+    targetPlatform: Annotated[Literal["Android", "iOS", "StandaloneWindows64", "StandaloneOSX"] | None, "Target build platform."] = None,
+    job_id: Annotated[str | None, "Job ID for status polling."] = None,
 ) -> dict[str, Any]:
     """Unified Addressables management tool."""
 
@@ -48,7 +50,7 @@ async def manage_addressables(
         }
 
     # Preflight for write actions (list_groups and get_dependency_chain are read-only)
-    read_actions = {"list_groups", "get_dependency_chain"}
+    read_actions = {"list_groups", "get_dependency_chain", "status"}
     if action_normalized not in read_actions:
         gate = await preflight(ctx, wait_for_no_compile=True, refresh_if_dirty=True)
         if gate is not None:
@@ -72,6 +74,10 @@ async def manage_addressables(
         params_dict["address"] = address
     if labels is not None:
         params_dict["labels"] = labels
+    if targetPlatform is not None:
+        params_dict["targetPlatform"] = targetPlatform
+    if job_id is not None:
+        params_dict["job_id"] = job_id
 
     # Remove any remaining None values
     params_dict = {k: v for k, v in params_dict.items() if v is not None}

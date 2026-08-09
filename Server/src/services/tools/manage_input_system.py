@@ -5,6 +5,8 @@ from mcp.types import ToolAnnotations
 
 from services.registry import mcp_for_unity_tool
 from services.tools import get_unity_instance_from_context
+from services.tools.preflight import preflight
+from services.tools.utils import coerce_bool, coerce_int
 from transport.unity_transport import send_with_unity_instance
 from transport.legacy.unity_connection import async_send_command_with_retry
 
@@ -72,6 +74,11 @@ async def manage_input_system(
     compositeType: Annotated[Literal["1DAxis", "2DVector", "3DVector", "Dpad", "Stick"] | None, "Composite binding type."] = None,
     compositeName: Annotated[str | None, "Name for the composite binding. Defaults to compositeType."] = None,
     parts: Annotated[dict[str, str] | None, "Composite parts as part-name to binding path, e.g. {\"up\": \"<Keyboard>/w\", \"down\": \"<Keyboard>/s\"}. Required for add_composite."] = None,
+    page_size: Annotated[int | str | None, "Number of action maps to return for get_asset."] = None,
+    cursor: Annotated[int | str | None, "Zero-based action map cursor for get_asset."] = None,
+    include_json: Annotated[bool | str | None, "Include a bounded JSON chunk for get_asset."] = None,
+    json_cursor: Annotated[int | str | None, "Zero-based JSON character cursor for get_asset."] = None,
+    json_chunk_size: Annotated[int | str | None, "Maximum JSON characters to return per get_asset chunk."] = None,
 ) -> dict[str, Any]:
     """Unified Input System management tool."""
 
@@ -87,6 +94,11 @@ async def manage_input_system(
         }
 
     unity_instance = await get_unity_instance_from_context(ctx)
+
+    if action_normalized != "get_asset":
+        gate = await preflight(ctx, wait_for_no_compile=True, refresh_if_dirty=True)
+        if gate is not None:
+            return gate.model_dump()
 
     params_dict: dict[str, Any] = {"action": action_normalized}
 
@@ -139,6 +151,18 @@ async def manage_input_system(
         params_dict["compositeName"] = compositeName
     if parts is not None:
         params_dict["parts"] = parts
+
+    if page_size is not None:
+        params_dict["pageSize"] = coerce_int(page_size, default=50)
+    if cursor is not None:
+        params_dict["cursor"] = coerce_int(cursor, default=0)
+    include_json_value = coerce_bool(include_json, default=None)
+    if include_json_value is not None:
+        params_dict["includeJson"] = include_json_value
+    if json_cursor is not None:
+        params_dict["jsonCursor"] = coerce_int(json_cursor, default=0)
+    if json_chunk_size is not None:
+        params_dict["jsonChunkSize"] = coerce_int(json_chunk_size, default=8192)
 
     # Remove any remaining None values
     params_dict = {k: v for k, v in params_dict.items() if v is not None}
